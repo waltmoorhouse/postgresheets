@@ -1,0 +1,138 @@
+{
+  "name": "postgresheets",
+  "displayName": "PostgreSQL Data Editor",
+  "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
+  "version": "1.0.1",
+  "publisher": "Walt Moorhouse",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:waltmoorhouse/postgresheets.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:postgresExplorer"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "postgres-editor.addConnection",
+        "title": "Add Connection",
+        "icon": "$(add)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.editConnection",
+        "title": "Edit Connection",
+        "icon": "$(edit)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.deleteConnection",
+        "title": "Delete Connection",
+        "icon": "$(trash)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.refreshExplorer",
+        "title": "Refresh",
+        "icon": "$(refresh)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.openTable",
+        "title": "Open Table",
+        "category": "PostgreSQL"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "postgres-explorer",
+          "title": "PostgreSQL",
+          "icon": "$(database)"
+        }
+      ]
+    },
+    "views": {
+      "postgres-explorer": [
+        {
+          "id": "postgresExplorer",
+          "name": "Connections"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "postgres-editor.addConnection",
+          "when": "view == postgresExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.refreshExplorer",
+          "when": "view == postgresExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "postgres-editor.editConnection",
+          "when": "view == postgresExplorer && viewItem == connection",
+          "group": "inline"
+        },
+        {
+          "command": "postgres-editor.deleteConnection",
+          "when": "view == postgresExplorer && viewItem == connection",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "PostgreSQL Data Editor",
+      "properties": {
+        "postgresDataEditor.paginationSize": {
+          "type": "number",
+          "default": 100,
+          "description": "Number of rows to display per page in the data editor."
+        },
+        "postgresDataEditor.batchMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable batch mode for executing changes."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:package": "npm run vscode:prepublish && npx vsce package",
+    "vscode:prepublish": "rm -rf out && npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.x",
+    "@types/pg": "^8.15.5",
+    "@types/vscode": "^1.80.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.4",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "pg": "^8.11.0"
+  },
+  "jest": {
+    "transform": {
+      "^.+\\.tsx?$": "ts-jest"
+    },
+    "testEnvironment": "node"
+  }
+}

@@ -1,0 +1,25 @@
+# Node.js dependencies
+node_modules/
+
+# TypeScript build output
+out/
+*.js
+*.js.map
+*.vsix
+
+# Logs
+logs/
+*.log
+
+# VS Code settings
+.vscode/
+
+# Environment files
+.env
+
+# Test coverage
+coverage/
+
+# Miscellaneous
+.DS_Store
+*.tmp
