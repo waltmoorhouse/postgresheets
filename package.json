@@ -3,7 +3,7 @@
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
   "version": "1.0.1",
-  "publisher": "Walt Moorhouse",
+  "publisher": "WaltMoorhouse",
   "repository": {
     "type": "git",
     "url": "git@github.com:waltmoorhouse/postgresheets.git"

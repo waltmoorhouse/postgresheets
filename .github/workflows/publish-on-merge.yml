@@ -1,0 +1,63 @@
+name: Publish extension on PR merge
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  publish-on-merge:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - uses: actions-ecosystem/action-release-label@v1
+        id: version-label
+        with:
+          label_prefix: version-
+
+      - uses: AnnuletConsulting/action-get-latest-tag@v1
+        id: get-latest-tag
+
+      - uses: actions-ecosystem/action-bump-semver@v1
+        id: bump-semver
+        with:
+          current_version: ${{ steps.get-latest-tag.outputs.tag }}
+          level: ${{ steps.version-label.outputs.level || 'patch' }}
+
+      - uses: actions-ecosystem/action-push-tag@v1
+        with:
+          tag: ${{ steps.bump-semver.outputs.new_version }}
+          message: '${{ steps.bump-semver.outputs.new_version }}: PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.title }}'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build extension
+        run: npm run compile
+
+      - name: Install vsce
+        run: npm install -g vsce
+
+      - name: Package extension
+        run: vsce package
+
+      - name: Publish to Visual Studio Marketplace
+        env:
+          VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+        run: |
+          if [ -z "$VSCE_TOKEN" ]; then
+            echo "VSCE_TOKEN secret is not set. Skipping publish.";
+            exit 1;
+          fi
+          # Publish the extension using the token. vsce reads the token via -p flag.
+          vsce publish -p "$VSCE_TOKEN"
