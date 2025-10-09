@@ -49,12 +49,7 @@ A VSCode extension that lets you connect to PostgreSQL databases and edit table 
 2. Click the `+` icon to add a new connection
 3. Enter connection details:
    - Connection name (e.g., "Production DB")
-   - Host (e.g., "localhost")
-   - Port (default: 5432)
-   - Database name
-   - Username
-   - Password (stored securely)
-   - SSL (Yes/No)
+   - Connection string (e.g., postgres://user:pass@hostname:port/db?sslmode=require)
 
 ### Browsing Database
 
@@ -116,19 +111,7 @@ A VSCode extension that lets you connect to PostgreSQL databases and edit table 
 Currently no custom keyboard shortcuts are defined. You can add them in VSCode settings.
 
 ## Database Support
-
-### Fully Supported
 - PostgreSQL 10+
-
-### Partially Supported
-- MySQL/MariaDB (compatible connection string format)
-  - To add MySQL support, install `mysql2` package and modify connectionManager.ts
-
-### Not Supported
-- SQLite
-- MongoDB
-- MSSQL
-- Oracle
 
 ## Troubleshooting
 
