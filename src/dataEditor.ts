@@ -430,9 +430,20 @@ export class DataEditor {
                         ${columns.map(col => {
                             const value = row[col.name];
                             const isJson = col.type === 'json' || col.type === 'jsonb';
+                            const isBool = col.type === 'boolean' || col.type === 'bool';
                             const displayValue = value === null ? 'NULL' : 
                                                isJson ? JSON.stringify(value) : 
                                                String(value);
+
+                            if (isBool) {
+                                const checked = value === true || value === 't' || value === 1 ? 'checked' : '';
+                                return `
+                                    <td data-column="${col.name}" data-type="${col.type}">
+                                        <input type="checkbox" class="bool-cell" ${checked} />
+                                    </td>
+                                `;
+                            }
+
                             return `
                                 <td 
                                     contenteditable="true" 
@@ -473,13 +484,23 @@ export class DataEditor {
         let changes = [];
         let currentJsonCell = null;
 
-        const primaryKeyColumns = ${JSON.stringify(primaryKey.columns)};
-        const currentPage = ${currentPage};
+    const primaryKeyColumns = ${JSON.stringify(primaryKey.columns)};
+    const columnsMeta = ${JSON.stringify(columns)};
+    const currentPage = ${currentPage};
 
-        // Track changes
+        // Track text changes
         document.getElementById('tableBody').addEventListener('input', (e) => {
             if (e.target.contentEditable === 'true') {
                 e.target.classList.add('modified');
+            }
+        });
+
+        // Track checkbox changes (booleans)
+        document.getElementById('tableBody').addEventListener('change', (e) => {
+            if (e.target.classList && e.target.classList.contains('bool-cell')) {
+                // mark the containing cell as modified
+                const cell = e.target.closest('td');
+                if (cell) cell.classList.add('modified');
             }
         });
 
@@ -518,14 +539,18 @@ export class DataEditor {
             newRow.classList.add('modified');
             newRow.setAttribute('data-new', 'true');
             
-            newRow.innerHTML = \`
-                <td class="row-number">
-                    <input type="checkbox" class="row-select">
-                </td>
-                ${columns.map(col => `
-                    <td contenteditable="true" data-column="${col.name}" data-type="${col.type}"></td>
-                `).join('')}
-            \`;
+            // Build row cells from columnsMeta to avoid nested template literal issues
+            const cellsHtml = columnsMeta.map(function(col) {
+                const isBool = col.type === 'boolean' || col.type === 'bool';
+                if (isBool) {
+                    return '<td data-column="' + col.name + '" data-type="' + col.type + '"><input type="checkbox" class="bool-cell" /></td>';
+                }
+                return '<td contenteditable="true" data-column="' + col.name + '" data-type="' + col.type + '"></td>';
+            }).join('');
+
+            newRow.innerHTML = '<td class="row-number">' +
+                '<input type="checkbox" class="row-select">' +
+                '</td>' + cellsHtml;
             tbody.appendChild(newRow);
         });
 
@@ -610,7 +635,13 @@ export class DataEditor {
                     row.querySelectorAll('td[data-column]').forEach(cell => {
                         const column = cell.getAttribute('data-column');
                         const type = cell.getAttribute('data-type');
-                        const value = parseValue(cell.textContent, type);
+                        const checkbox = cell.querySelector('input[type="checkbox"]');
+                        let value;
+                        if (checkbox) {
+                            value = checkbox.checked;
+                        } else {
+                            value = parseValue(cell.textContent, type);
+                        }
                         data[column] = value;
                     });
                     changes.push({
@@ -644,7 +675,13 @@ export class DataEditor {
                         if (cell.classList.contains('modified')) {
                             const column = cell.getAttribute('data-column');
                             const type = cell.getAttribute('data-type');
-                            const value = parseValue(cell.textContent, type);
+                            const checkbox = cell.querySelector('input[type="checkbox"]');
+                            let value;
+                            if (checkbox) {
+                                value = checkbox.checked;
+                            } else {
+                                value = parseValue(cell.textContent, type);
+                            }
                             data[column] = value;
                         }
                     });
@@ -707,11 +744,22 @@ export class DataEditor {
                 case 'updateTable':
                     (function(){
                         const tableBody = document.getElementById('tableBody');
-                        const webColumns = ${JSON.stringify(columns.map(col => col.name))};
-                        tableBody.innerHTML = message.rows.map(row => {
-                            return '<tr>' + webColumns.map(col => {
-                                return '<td>' + row[col] + '</td>';
-                            }).join('') + '</tr>';
+                        tableBody.innerHTML = message.rows.map(function(row, ridx) {
+                            const cells = columnsMeta.map(function(col) {
+                                const val = row[col.name];
+                                const isJson = col.type === 'json' || col.type === 'jsonb';
+                                const isBool = col.type === 'boolean' || col.type === 'bool';
+                                if (isBool) {
+                                    const checked = val === true || val === 't' || val === 1 ? 'checked' : '';
+                                    return '<td data-column="' + col.name + '" data-type="' + col.type + '"><input type="checkbox" class="bool-cell" ' + checked + ' /></td>';
+                                }
+                                const display = val === null ? 'NULL' : (isJson ? JSON.stringify(val) : String(val));
+                                return '<td contenteditable="true" data-column="' + col.name + '" data-type="' + col.type + '">' + display + '</td>';
+                            }).join('');
+
+                            const original = JSON.stringify(row).replace(/'/g, "\u0027");
+                            return '<tr data-row-index="' + ridx + '" data-original=\'' + original + '\'>' +
+                                '<td class="row-number"><input type="checkbox" class="row-select"></td>' + cells + '</tr>';
                         }).join('');
                     })();
                     break;
