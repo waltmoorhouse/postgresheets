@@ -16,12 +16,20 @@ export interface ConnectionConfig {
     ssl?: boolean;
 }
 
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'busy' | 'error';
+
 /**
  * Manages PostgreSQL database connections and credentials.
  */
 export class ConnectionManager {
     private context: vscode.ExtensionContext;
     private connections: Map<string, Client> = new Map();
+    private connectionStatuses: Map<string, ConnectionStatus> = new Map();
+    private activityCounters: Map<string, number> = new Map();
+    private pendingConnections: Map<string, Promise<Client | null>> = new Map();
+    private statusEmitter = new vscode.EventEmitter<{ id: string; status: ConnectionStatus }>();
+
+    readonly onStatusChange = this.statusEmitter.event;
 
     /**
      * Initializes the ConnectionManager with the given extension context.
@@ -64,6 +72,8 @@ export class ConnectionManager {
 
         // Save config (without password)
         await this.saveConnection(config);
+
+        this.setStatus(id, 'disconnected');
 
         // Save password securely if present in the connection string
         if (parsed.password) {
@@ -172,12 +182,7 @@ export class ConnectionManager {
             await this.context.globalState.update('connections', filtered);
             await this.context.secrets.delete(`postgres-password-${id}`);
             
-            // Close connection if open
-            const client = this.connections.get(id);
-            if (client) {
-                await client.end();
-                this.connections.delete(id);
-            }
+            await this.disconnect(id);
 
             vscode.window.showInformationMessage(`Connection "${config.name}" deleted`);
         }
@@ -197,38 +202,150 @@ export class ConnectionManager {
      * @returns A promise that resolves to a PostgreSQL client or null if the connection fails.
      */
     async getClient(id: string): Promise<Client | null> {
-        // Return cached connection if exists
-        if (this.connections.has(id)) {
+        return this.connect(id);
+    }
+
+    async connect(id: string, forceReconnect: boolean = false): Promise<Client | null> {
+        // If already connected and not forcing reconnect, return existing client without status changes
+        if (!forceReconnect && this.connections.has(id)) {
             return this.connections.get(id)!;
+        }
+
+        if (forceReconnect) {
+            await this.disconnect(id);
+        }
+
+        const pending = this.pendingConnections.get(id);
+        if (pending) {
+            return pending;
         }
 
         const connections = await this.getConnections();
         const config = connections.find(c => c.id === id);
-        if (!config) return null;
+        if (!config) {
+            this.setStatus(id, 'error');
+            return null;
+        }
 
         const password = await this.context.secrets.get(`postgres-password-${id}`);
         if (!password) {
             vscode.window.showErrorMessage('Password not found for this connection');
+            this.setStatus(id, 'error');
             return null;
         }
+
+        this.setStatus(id, 'connecting');
+
+        const connectPromise = (async () => {
+            try {
+                const client = new Client({
+                    host: config.host,
+                    port: config.port,
+                    database: config.database,
+                    user: config.username,
+                    password,
+                    ssl: config.ssl ? { rejectUnauthorized: false } : undefined
+                });
+
+                await client.connect();
+                this.attachClientListeners(id, client);
+                this.connections.set(id, client);
+                this.setStatus(id, 'connected');
+                return client;
+            } catch (error) {
+                this.setStatus(id, 'error');
+                vscode.window.showErrorMessage(`Failed to connect: ${error}`);
+                return null;
+            }
+        })();
+
+        this.pendingConnections.set(id, connectPromise);
 
         try {
-            const client = new Client({
-                host: config.host,
-                port: config.port,
-                database: config.database,
-                user: config.username,
-                password: password,
-                ssl: config.ssl ? { rejectUnauthorized: false } : undefined
-            });
-
-            await client.connect();
-            this.connections.set(id, client);
-            return client;
-        } catch (error) {
-            vscode.window.showErrorMessage(`Failed to connect: ${error}`);
-            return null;
+            return await connectPromise;
+        } finally {
+            this.pendingConnections.delete(id);
         }
+    }
+
+    async disconnect(id: string): Promise<void> {
+        const pending = this.pendingConnections.get(id);
+        if (pending) {
+            try {
+                await pending;
+            } catch {
+                // ignore errors here; pending connect already surfaced
+            }
+        }
+
+        const client = this.connections.get(id);
+        if (client) {
+            this.connections.delete(id);
+            this.activityCounters.delete(id);
+            try {
+                await client.end();
+            } catch (error) {
+                console.error(`Failed to close connection ${id}`, error);
+            }
+        }
+        this.setStatus(id, 'disconnected');
+    }
+
+    async refreshConnection(id: string): Promise<Client | null> {
+        await this.disconnect(id);
+        return this.connect(id, false);
+    }
+
+    getConnectionStatus(id: string): ConnectionStatus {
+        return this.connectionStatuses.get(id) ?? 'disconnected';
+    }
+
+    markBusy(id: string): void {
+        if (!id) return;
+        const count = this.activityCounters.get(id) ?? 0;
+        this.activityCounters.set(id, count + 1);
+        // Only change status if we're transitioning from idle to busy
+        if (count === 0 && this.connections.has(id)) {
+            this.setStatus(id, 'busy');
+        }
+    }
+
+    markIdle(id: string): void {
+        if (!id) return;
+        const count = this.activityCounters.get(id) ?? 0;
+        const next = Math.max(count - 1, 0);
+        if (next === 0) {
+            this.activityCounters.delete(id);
+            const hasClient = this.connections.has(id);
+            // Only change status if we're transitioning from busy to idle
+            const currentStatus = this.connectionStatuses.get(id);
+            if (currentStatus === 'busy') {
+                this.setStatus(id, hasClient ? 'connected' : 'disconnected');
+            }
+        } else {
+            this.activityCounters.set(id, next);
+        }
+    }
+
+    flagError(id: string): void {
+        this.connections.delete(id);
+        this.activityCounters.delete(id);
+        this.setStatus(id, 'error');
+    }
+
+    private attachClientListeners(id: string, client: Client): void {
+        client.on('error', (error) => {
+            console.error(`Connection ${id} error`, error);
+            this.connections.delete(id);
+            this.activityCounters.delete(id);
+            this.setStatus(id, 'error');
+        });
+
+        client.on('end', () => {
+            this.connections.delete(id);
+            this.activityCounters.delete(id);
+            this.setStatus(id, 'disconnected');
+        });
     }
 
     /**
@@ -264,5 +381,14 @@ export class ConnectionManager {
             value,
             password
         });
+    }
+
+    private setStatus(id: string, status: ConnectionStatus): void {
+        const previous = this.connectionStatuses.get(id);
+        if (previous === status) {
+            return;
+        }
+        this.connectionStatuses.set(id, status);
+        this.statusEmitter.fire({ id, status });
     }
 }

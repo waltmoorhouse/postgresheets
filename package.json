@@ -2,8 +2,9 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "1.0.7",
+  "version": "1.0.11",
   "publisher": "WaltMoorhouse",
+  "icon": "images/icon-128.png",
   "repository": {
     "type": "git",
     "url": "git@github.com:waltmoorhouse/postgresheets.git"
@@ -13,7 +14,7 @@
   },
   "categories": [
     "Other"
-  ],
+  ],  
   "activationEvents": [
     "onView:postgresExplorer"
   ],
@@ -47,6 +48,43 @@
       {
         "command": "postgres-editor.openTable",
         "title": "Open Table",
+        "icon": "$(table)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.connect",
+        "title": "Connect",
+        "icon": "$(plug)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.disconnect",
+        "title": "Disconnect",
+        "icon": "$(debug-disconnect)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.refreshConnection",
+        "title": "Reconnect",
+        "icon": "$(sync)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.createTable",
+        "title": "Create Table",
+        "icon": "$(diff-added)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.alterTable",
+        "title": "Alter Table",
+        "icon": "$(edit)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.dropTable",
+        "title": "Drop Table",
+        "icon": "$(trash)",
         "category": "PostgreSQL"
       }
     ],
@@ -63,7 +101,8 @@
       "postgres-explorer": [
         {
           "id": "postgresExplorer",
-          "name": "Connections"
+          "name": "Connections",
+          "icon": "$(database)"
         }
       ]
     },
@@ -82,13 +121,43 @@
       ],
       "view/item/context": [
         {
+          "command": "postgres-editor.connect",
+          "when": "view == postgresExplorer && (viewItem == connection.disconnected || viewItem == connection.error)",
+          "group": "inline@0"
+        },
+        {
+          "command": "postgres-editor.disconnect",
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy || viewItem == connection.connecting)",
+          "group": "inline@1"
+        },
+        {
+          "command": "postgres-editor.refreshConnection",
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy || viewItem == connection.error)",
+          "group": "inline@2"
+        },
+        {
           "command": "postgres-editor.editConnection",
-          "when": "view == postgresExplorer && viewItem == connection",
-          "group": "inline"
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.disconnected || viewItem == connection.connecting || viewItem == connection.busy || viewItem == connection.error)",
+          "group": "inline@3"
         },
         {
           "command": "postgres-editor.deleteConnection",
-          "when": "view == postgresExplorer && viewItem == connection",
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.disconnected || viewItem == connection.connecting || viewItem == connection.busy || viewItem == connection.error)",
+          "group": "inline@4"
+        },
+        {
+          "command": "postgres-editor.createTable",
+          "when": "view == postgresExplorer && viewItem == schema",
+          "group": "inline"
+        },
+        {
+          "command": "postgres-editor.alterTable",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "inline"
+        },
+        {
+          "command": "postgres-editor.dropTable",
+          "when": "view == postgresExplorer && viewItem == table",
           "group": "inline"
         }
       ]

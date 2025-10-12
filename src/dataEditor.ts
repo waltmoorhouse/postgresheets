@@ -89,6 +89,8 @@ export class DataEditor {
         const client = await this.connectionManager.getClient(connectionId);
         if (!client) return;
 
+        this.connectionManager.markBusy(connectionId);
+
         try {
             // Get columns info
             const columnsResult = await client.query(`
@@ -140,6 +142,8 @@ export class DataEditor {
             );
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load table data: ${error}`);
+        } finally {
+            this.connectionManager.markIdle(connectionId);
         }
     }
 
@@ -180,6 +184,8 @@ export class DataEditor {
         const client = await this.connectionManager.getClient(connectionId);
         if (!client) return;
 
+        this.connectionManager.markBusy(connectionId);
+
         try {
             if (batchMode) {
                 await client.query('BEGIN');
@@ -205,6 +211,8 @@ export class DataEditor {
             }
             vscode.window.showErrorMessage(`Failed to execute changes: ${error}`);
             panel.webview.postMessage({ command: 'executionComplete', success: false, error: String(error) });
+        } finally {
+            this.connectionManager.markIdle(connectionId);
         }
     }
 
@@ -780,6 +788,8 @@ export class DataEditor {
         const client = await this.connectionManager.getClient(connectionId);
         if (!client) return;
 
+        this.connectionManager.markBusy(connectionId);
+
         try {
             // Fetch column metadata to dynamically build the query
             const columnsResult = await client.query(
@@ -802,6 +812,8 @@ export class DataEditor {
             });
         } catch (error) {
             vscode.window.showErrorMessage(`Search failed: ${error}`);
+        } finally {
+            this.connectionManager.markIdle(connectionId);
         }
     }
 }
