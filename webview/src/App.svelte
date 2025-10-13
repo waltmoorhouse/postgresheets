@@ -34,6 +34,8 @@
   let batchMode = true;
   let searchTerm = '';
   let sqlPreview = '';
+  let sqlPreviewOpen = false;
+  let previewLoading = false;
   let executionMessage = '';
   let executionError = '';
   let executing = false;
@@ -121,6 +123,8 @@
     batchMode = payload.batchMode ?? true;
     searchTerm = '';
     sqlPreview = '';
+    sqlPreviewOpen = false;
+    previewLoading = false;
     executionMessage = '';
     executionError = '';
     executing = false;
@@ -129,7 +133,7 @@
     activeSort = payload.sort ?? null;
     filters = { ...(payload.filters ?? {}) };
     searchTerm = payload.searchTerm ?? '';
-  columnWidths = {};
+    columnWidths = {};
     jsonEditorOpen = false;
     jsonEditorRow = null;
     jsonEditorColumn = null;
@@ -462,6 +466,16 @@
     });
   }
 
+  function setColumnWidth(columnName: string, width: number): void {
+    columnWidths = { ...columnWidths, [columnName]: width };
+    const header = headerRefs[columnName];
+    if (header) {
+      header.style.width = `${width}px`;
+      header.style.minWidth = `${width}px`;
+      header.style.maxWidth = `${width}px`;
+    }
+  }
+
   function clearFilters(): void {
     filters = {};
     commitFilters();
@@ -492,7 +506,7 @@
 
     // Set initial width if not set
     if (!columnWidths[column.name]) {
-      columnWidths = { ...columnWidths, [column.name]: resizeStartWidth };
+      setColumnWidth(column.name, resizeStartWidth);
     }
 
     document.body.style.cursor = 'col-resize';
@@ -528,7 +542,7 @@
 
   function columnStyle(column: ColumnInfo): string {
     const width = columnWidths[column.name];
-    return width ? `width: ${width}px; min-width: ${width}px;` : '';
+    return width ? `width: ${width}px; min-width: ${width}px; max-width: ${width}px;` : '';
   }
 
   function handlePointerMove(event: PointerEvent): void {
@@ -538,7 +552,7 @@
     event.preventDefault();
     const delta = event.clientX - resizeStartX;
     const newWidth = Math.max(60, resizeStartWidth + delta);
-    columnWidths = { ...columnWidths, [resizingColumn]: newWidth };
+    setColumnWidth(resizingColumn, newWidth);
   }
 
   function handleMouseMove(event: MouseEvent): void {
@@ -548,7 +562,7 @@
     event.preventDefault();
     const delta = event.clientX - resizeStartX;
     const newWidth = Math.max(60, resizeStartWidth + delta);
-    columnWidths = { ...columnWidths, [resizingColumn]: newWidth };
+    setColumnWidth(resizingColumn, newWidth);
   }
 
   function stopResize(event?: Event): void {
@@ -570,9 +584,9 @@
       resizingColumn = null;
     }
 
-  window.removeEventListener('pointermove', handlePointerMove);
-  window.removeEventListener('pointerup', stopResize);
-  window.removeEventListener('pointercancel', stopResize);
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('pointerup', stopResize);
+    window.removeEventListener('pointercancel', stopResize);
     window.removeEventListener('mousemove', handleMouseMove);
     window.removeEventListener('mouseup', stopResize);
     if (event instanceof MouseEvent && event.type === 'mouseup') {
@@ -638,6 +652,9 @@
 
   function requestPreview(): void {
     const changes = gatherChanges();
+    previewLoading = true;
+    sqlPreviewOpen = true;
+    sqlPreview = '';
     ensureVscode().postMessage({
       command: 'previewSql',
       payload: {
@@ -645,6 +662,16 @@
         primaryKey
       }
     });
+  }
+
+  function closeSqlPreview(): void {
+    sqlPreviewOpen = false;
+    previewLoading = false;
+  }
+
+  function executeFromPreview(): void {
+    closeSqlPreview();
+    requestExecution();
   }
 
   function requestExecution(): void {
@@ -699,6 +726,8 @@
         break;
       case 'sqlPreview':
         sqlPreview = String(message.payload ?? '');
+        previewLoading = false;
+        sqlPreviewOpen = true;
         break;
       case 'executionComplete':
         executing = false;
@@ -709,6 +738,8 @@
           executionError = message.error ? String(message.error) : 'Execution failed';
           executionMessage = '';
         }
+        previewLoading = false;
+        sqlPreviewOpen = false;
         break;
       case 'showMessage':
         executionMessage = message.text ? String(message.text) : '';
@@ -791,6 +822,13 @@
 
     <section class="table-wrapper">
       <table>
+        <colgroup>
+          <col class="select-column">
+          {#each columns as column}
+            <col style={columnStyle(column)}>
+          {/each}
+          <col class="row-actions-column">
+        </colgroup>
         <thead>
           <tr>
             <th class="select-cell">
@@ -917,13 +955,6 @@
     </section>
 
     <section class="feedback">
-      {#if sqlPreview}
-        <details open>
-          <summary>SQL preview</summary>
-          <pre>{sqlPreview}</pre>
-        </details>
-      {/if}
-
       {#if executionMessage}
         <div class="message success">{executionMessage}</div>
       {/if}
@@ -933,6 +964,29 @@
       {/if}
     </section>
   </div>
+
+  {#if sqlPreviewOpen}
+    <div class="modal">
+      <div class="modal-content preview-modal">
+        <header>
+          <h3>SQL Preview</h3>
+        </header>
+        {#if previewLoading}
+          <p class="preview-status">Generating SQL preview…</p>
+        {:else if sqlPreview}
+          <pre>{sqlPreview}</pre>
+        {:else}
+          <p class="preview-status">No SQL changes to display.</p>
+        {/if}
+        <footer>
+          <button on:click={closeSqlPreview}>Cancel</button>
+          <button class="accent" on:click={executeFromPreview} disabled={executing || previewLoading}>
+            Execute
+          </button>
+        </footer>
+      </div>
+    </div>
+  {/if}
 
   {#if jsonEditorOpen && jsonEditorRow && jsonEditorColumn}
     <div class="modal">
@@ -1104,10 +1158,19 @@
   }
 
   table {
-    width: max-content;
+    width: auto;
     min-width: 100%;
     border-collapse: collapse;
     font-size: 13px;
+    table-layout: fixed;
+  }
+
+  col.select-column {
+    width: 36px;
+  }
+
+  col.row-actions-column {
+    width: 90px;
   }
 
   thead {
@@ -1123,6 +1186,10 @@
     padding: 8px 10px;
     text-align: left;
     vertical-align: middle;
+  }
+
+  td {
+    overflow: hidden;
   }
 
   th {
@@ -1364,6 +1431,20 @@
 
   textarea.invalid {
     border-color: rgba(232, 70, 80, 0.7);
+  }
+
+  .modal-content.preview-modal {
+    width: min(900px, 95vw);
+  }
+
+  .modal-content.preview-modal pre {
+    max-height: 360px;
+    overflow: auto;
+  }
+
+  .preview-status {
+    margin: 0;
+    color: var(--vscode-descriptionForeground);
   }
 
   footer {
