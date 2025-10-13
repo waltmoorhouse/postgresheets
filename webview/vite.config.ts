@@ -18,7 +18,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         'data-editor/main': path.resolve(__dirname, './src/main.ts'),
-        'schema-designer/main': path.resolve(__dirname, './src/schema-designer/main.ts')
+        'schema-designer/main': path.resolve(__dirname, './src/schema-designer/main.ts'),
+        'create-table/main': path.resolve(__dirname, './src/create-table/main.ts'),
+        'drop-table/main': path.resolve(__dirname, './src/drop-table/main.ts')
       },
       output: {
         entryFileNames: '[name].js',

@@ -15,6 +15,7 @@ export interface PrimaryKeyInfo {
 }
 
 export interface TableStatePayload {
+  view?: 'dataEditor';
   schemaName: string;
   tableName: string;
   columns: ColumnInfo[];
@@ -68,6 +69,7 @@ export interface SchemaDesignerColumn {
 }
 
 export interface SchemaDesignerInitialState {
+  view: 'schemaDesigner';
   schemaName: string;
   tableName: string;
   columns: SchemaDesignerColumn[];
@@ -83,3 +85,49 @@ export interface SchemaDesignerPreviewPayload {
   useManualSql?: boolean;
   sql?: string;
 }
+
+export interface CreateTableColumnDraft {
+  id: string;
+  name: string;
+  type: string;
+  nullable: boolean;
+  defaultValue: string | null;
+  comment: string | null;
+  isPrimaryKey: boolean;
+}
+
+export interface CreateTableInitialState {
+  view: 'createTable';
+  schemaName: string;
+  suggestedTableName: string;
+  typeOptions: string[];
+  columns: CreateTableColumnDraft[];
+}
+
+export interface CreateTablePreviewPayload {
+  tableName: string;
+  columns: CreateTableColumnDraft[];
+  useManualSql?: boolean;
+  sql?: string;
+}
+
+export interface DropTableInitialState {
+  view: 'dropTable';
+  schemaName: string;
+  tableName: string;
+  defaultCascade?: boolean;
+  sql?: string;
+  warnings?: string[];
+}
+
+export interface DropTablePreviewPayload {
+  schemaName: string;
+  tableName: string;
+  cascade: boolean;
+}
+
+export type WebviewInitialState =
+  | TableStatePayload
+  | SchemaDesignerInitialState
+  | CreateTableInitialState
+  | DropTableInitialState;

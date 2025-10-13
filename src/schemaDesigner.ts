@@ -17,6 +17,7 @@ interface SchemaDesignerColumnDraft {
 }
 
 interface SchemaDesignerInitialPayload {
+    view: 'schemaDesigner';
     schemaName: string;
     tableName: string;
     columns: SchemaDesignerColumnState[];
@@ -248,6 +249,7 @@ export class SchemaDesigner {
             const constraintName = constraintResult.rows[0]?.conname ? String(constraintResult.rows[0].conname) : null;
 
             return {
+                view: 'schemaDesigner',
                 schemaName,
                 tableName,
                 columns,
@@ -270,7 +272,7 @@ export class SchemaDesigner {
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'schema-designer', 'main.js')
         );
         const baseStyleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'clsx.css')
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'index.css')
         );
         const appStyleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main2.css')
