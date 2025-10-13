@@ -17,25 +17,26 @@
 
 ## Phase 2 · Enhanced Grid Experience
 
-- [ ] Adopt or implement a Svelte data grid supporting column resizing, sorting, and filtering (evaluate community components vs. custom solution).
-- [ ] Wire column resizing state to persist per-session (or per-table) where feasible.
-- [ ] Implement sortable headers with multi-way sort (asc/desc/reset) integrated with backend queries.
-- [ ] Add column-level filtering UI that pushes filter clauses to the extension SQL generator with parameterization.
-- [ ] Update change tracking logic to accommodate re-ordered/filtered views without losing edits.
+- [x] Adopt or implement a Svelte data grid supporting column resizing, sorting, and filtering (evaluate community components vs. custom solution).
+- [x] Wire column resizing state to persist per-session (or per-table) where feasible.
+- [x] Implement sortable headers with multi-way sort (asc/desc/reset) integrated with backend queries.
+- [x] Add column-level filtering UI that pushes filter clauses to the extension SQL generator with parameterization.
+- [x] Update change tracking logic to accommodate re-ordered/filtered views without losing edits.
+- [x] Refresh removes any pending edits and downloads the latest data from the server.
 
 ## Phase 3 · Visual Refinement
 
-- [ ] Establish a shared design system (colors, typography, spacing) inspired by modern GitLens aesthetics while respecting VS Code theming.
-- [ ] Refine layout: adjust toolbars, status indicators, pagination controls, and dialogs for consistent spacing and alignment.
-- [ ] Introduce subtle animations/transitions where appropriate (panel transitions, hover states) without impacting performance.
-- [ ] Ensure dark/light theme support and high-contrast accessibility compliance.
+- [x] Establish a shared design system (colors, typography, spacing) inspired by modern GitLens aesthetics while respecting VS Code theming.
+- [x] Refine layout: adjust toolbars, status indicators, pagination controls, and dialogs for consistent spacing and alignment.
+- [x] Introduce subtle animations/transitions where appropriate (panel transitions, hover states) without impacting performance.
+- [x] Ensure dark/light theme support and high-contrast accessibility compliance.
 
 ## Phase 4 · Graphical Schema Designer
 
-- [ ] Build a dedicated Svelte modal/workbench for Alter Table operations with column list, type selectors, constraints, and attribute editors.
-- [ ] Provide live SQL preview that updates as users modify schema settings, with ability to toggle raw SQL editing for power users.
-- [ ] Integrate validation (duplicate column names, incompatible changes) with inline messaging.
-- [ ] Hook execution flow to existing extension commands; confirm transactional safety and rollback messaging.
+- [x] Build a dedicated Svelte modal/workbench for Alter Table operations with column list, type selectors, constraints, and attribute editors.
+- [x] Provide live SQL preview that updates as users modify schema settings, with ability to toggle raw SQL editing for power users.
+- [x] Integrate validation (duplicate column names, incompatible changes) with inline messaging.
+- [x] Hook execution flow to existing extension commands; confirm transactional safety and rollback messaging.
 
 ## Phase 5 · Broader No-SQL Workflows
 

@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { ConnectionManager, ConnectionConfig } from './connectionManager';
 import { DatabaseTreeItem, DatabaseTreeProvider } from './databaseTreeProvider';
 import { DataEditor } from './dataEditor';
-import { buildAlterTableSql, buildCreateTableSql, buildDropTableSql } from './tableSqlBuilder';
+import { buildCreateTableSql, buildDropTableSql } from './tableSqlBuilder';
+import { SchemaDesigner } from './schemaDesigner';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('PostgreSQL Data Editor extension is now active');
@@ -10,6 +11,7 @@ export function activate(context: vscode.ExtensionContext) {
     const connectionManager = new ConnectionManager(context);
     const treeProvider = new DatabaseTreeProvider(connectionManager);
     const dataEditor = new DataEditor(context, connectionManager);
+    const schemaDesigner = new SchemaDesigner(context, connectionManager);
 
     // Register tree view
     const treeView = vscode.window.createTreeView('postgresExplorer', {
@@ -198,28 +200,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const clause = await vscode.window.showInputBox({
-                prompt: 'Enter ALTER TABLE clause (e.g. ADD COLUMN status TEXT NOT NULL)',
-                placeHolder: 'ADD COLUMN status TEXT NOT NULL'
-            });
-            if (clause === undefined) return;
-
-            let sql: string;
-            try {
-                sql = buildAlterTableSql(item.schemaName!, item.tableName!, clause);
-            } catch (error) {
-                vscode.window.showErrorMessage(String(error));
-                return;
-            }
-
-            const shouldRun = await showSqlConfirmation(`Alter table "${item.tableName}"?`, sql);
-            if (!shouldRun) return;
-
-            const executed = await executeSql(item.connectionId, sql);
-            if (executed) {
-                vscode.window.showInformationMessage(`Table "${item.tableName}" altered successfully.`);
-                treeProvider.refresh();
-            }
+            await schemaDesigner.openDesigner(item);
         }),
 
         vscode.commands.registerCommand('postgres-editor.dropTable', async (item: DatabaseTreeItem) => {

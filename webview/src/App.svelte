@@ -23,6 +23,20 @@
     deleted: boolean;
   }
 
+  interface DraftState {
+    current: Record<string, unknown>;
+    deleted: boolean;
+  }
+
+  interface DraftSnapshot {
+    updates: Record<string, DraftState>;
+    inserts: RowState[];
+  }
+
+  interface PersistedState {
+    columnWidths?: Record<string, number>;
+  }
+
   let schemaName = '';
   let tableName = '';
   let columns: ColumnInfo[] = [];
@@ -44,6 +58,16 @@
   let activeSort: SortDescriptor | null = null;
   let filters: FilterMap = {};
   let columnWidths: Record<string, number> = {};
+  let resetDraftState = false;
+  let discardDraftForNextLoad = false;
+
+  const persistedState: PersistedState | undefined =
+    vscode && typeof vscode.getState === 'function'
+      ? (vscode.getState() as PersistedState | undefined)
+      : undefined;
+  if (persistedState?.columnWidths) {
+    columnWidths = { ...persistedState.columnWidths };
+  }
 
   const headerRefs: Record<string, HTMLTableCellElement> = {};
   function registerHeader(node: HTMLTableCellElement, columnName: string) {
@@ -93,6 +117,26 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function cloneRowState(row: RowState): RowState {
+    return {
+      id: row.id,
+      original: deepClone(row.original),
+      current: deepClone(row.current),
+      selected: row.selected,
+      isNew: row.isNew,
+      deleted: row.deleted
+    };
+  }
+
+  function buildRowKey(source: Record<string, unknown>): string {
+    if (!primaryKey.length) {
+      return JSON.stringify(source);
+    }
+    return primaryKey
+      .map((column) => `${column}:${JSON.stringify(source[column])}`)
+      .join('|');
+  }
+
   function normalizePrimaryKey(payloadPk: PrimaryKeyInfo | string[] | undefined): string[] {
     if (!payloadPk) {
       return [];
@@ -103,20 +147,34 @@
     return payloadPk.columns ?? [];
   }
 
-  function initialise(payload: TableStatePayload): void {
+  function initialise(payload: TableStatePayload, snapshot?: DraftSnapshot): void {
+    const previousColumnWidths = { ...columnWidths };
+    const updateSnapshot = snapshot?.updates ?? {};
+
     schemaName = payload.schemaName;
     tableName = payload.tableName;
     columns = payload.columns ?? [];
     primaryKey = normalizePrimaryKey(payload.primaryKey);
     const rawRows = payload.rows ?? [];
-    rows = rawRows.map((row, index) => ({
-      id: index + 1,
-      original: deepClone(row),
-      current: deepClone(row),
-      selected: false,
-      isNew: false,
-      deleted: false
-    }));
+    rows = rawRows.map((row, index) => {
+      const original = deepClone(row);
+      const key = buildRowKey(original);
+      const draft = updateSnapshot[key];
+      return {
+        id: index + 1,
+        original,
+        current: draft ? deepClone(draft.current) : deepClone(row),
+        selected: false,
+        isNew: false,
+        deleted: draft?.deleted ?? false
+      };
+    });
+    if (snapshot?.inserts?.length) {
+      rows = [
+        ...rows,
+        ...snapshot.inserts.map((row) => cloneRowState(row))
+      ];
+    }
     currentPage = payload.currentPage ?? 0;
     totalRows = payload.totalRows ?? rawRows.length;
     paginationSize = payload.paginationSize ?? 100;
@@ -128,12 +186,20 @@
     executionMessage = '';
     executionError = '';
     executing = false;
-    selectAll = false;
+  selectAll = rows.length > 0 && rows.every((row) => row.deleted || row.selected);
     initialized = true;
     activeSort = payload.sort ?? null;
     filters = { ...(payload.filters ?? {}) };
     searchTerm = payload.searchTerm ?? '';
-    columnWidths = {};
+    const sanitizedColumnWidths: Record<string, number> = {};
+    columns.forEach((column) => {
+      const width = previousColumnWidths[column.name];
+      if (typeof width === 'number' && Number.isFinite(width) && width > 0) {
+        sanitizedColumnWidths[column.name] = width;
+      }
+    });
+    columnWidths = sanitizedColumnWidths;
+    persistColumnWidths();
     jsonEditorOpen = false;
     jsonEditorRow = null;
     jsonEditorColumn = null;
@@ -223,6 +289,37 @@
       return true;
     }
     return columns.some((column) => isColumnModified(row, column));
+  }
+
+  function createDraftSnapshot(): DraftSnapshot {
+    if (resetDraftState) {
+      resetDraftState = false;
+      return { updates: {}, inserts: [] };
+    }
+
+    const updates: Record<string, DraftState> = {};
+    const inserts: RowState[] = [];
+
+    rows.forEach((row) => {
+      if (row.isNew) {
+        if (!row.deleted) {
+          inserts.push(cloneRowState(row));
+        }
+        return;
+      }
+
+      if (!row.deleted && !isRowModified(row)) {
+        return;
+      }
+
+      const key = buildRowKey(row.original);
+      updates[key] = {
+        current: deepClone(row.current),
+        deleted: row.deleted
+      };
+    });
+
+    return { updates, inserts };
   }
 
   function toggleRowSelection(row: RowState, event: Event): void {
@@ -466,6 +563,20 @@
     });
   }
 
+  function persistColumnWidths(): void {
+    if (!vscode || typeof vscode.setState !== 'function') {
+      return;
+    }
+    let previous: PersistedState = {};
+    if (typeof vscode.getState === 'function') {
+      previous = (vscode.getState() as PersistedState | undefined) ?? {};
+    }
+    vscode.setState({
+      ...previous,
+      columnWidths
+    });
+  }
+
   function setColumnWidth(columnName: string, width: number): void {
     columnWidths = { ...columnWidths, [columnName]: width };
     const header = headerRefs[columnName];
@@ -566,6 +677,7 @@
   }
 
   function stopResize(event?: Event): void {
+    const hadActiveColumn = Boolean(resizingColumn);
     if (activeResizeHandle && activeResizePointerId !== null) {
       if (typeof activeResizeHandle.releasePointerCapture === 'function') {
         try {
@@ -591,6 +703,10 @@
     window.removeEventListener('mouseup', stopResize);
     if (event instanceof MouseEvent && event.type === 'mouseup') {
       event.preventDefault();
+    }
+
+    if (hadActiveColumn) {
+      persistColumnWidths();
     }
   }
 
@@ -645,6 +761,7 @@
   }
 
   function requestRefresh(): void {
+    discardDraftForNextLoad = true;
     ensureVscode().postMessage({
       command: 'refresh'
     });
@@ -712,7 +829,9 @@
   }
 
   function refreshFromMessage(payload: TableStatePayload): void {
-    initialise(payload);
+    const snapshot = discardDraftForNextLoad ? undefined : createDraftSnapshot();
+    initialise(payload, snapshot);
+    discardDraftForNextLoad = false;
   }
 
   function handleMessage(event: MessageEvent): void {
@@ -732,6 +851,7 @@
       case 'executionComplete':
         executing = false;
         if (message.success) {
+          resetDraftState = true;
           executionMessage = 'Changes executed successfully';
           executionError = '';
         } else {
@@ -776,42 +896,86 @@
 {:else}
   <div class="container">
     <header class="header">
-      <div>
-        <h2>{schemaName}.<span class="table-name">{tableName}</span></h2>
-        <p class="subheader">{totalRows} rows · page {currentPage + 1}</p>
+      <div class="header-title">
+        <h2>
+          <span class="schema-name">{schemaName}</span>
+          <span class="delimiter" aria-hidden="true">.</span>
+          <span class="table-name">{tableName}</span>
+        </h2>
+        <p class="subheader">
+          <span>{totalRows} rows</span>
+          <span class="separator" aria-hidden="true">•</span>
+          <span>Page {currentPage + 1}</span>
+          {#if activeSort}
+            <span class="separator" aria-hidden="true">•</span>
+            <span class="badge" title={`Sorted by ${activeSort.column} ${activeSort.direction}`}>
+              Sort · {activeSort.column} {activeSort.direction}
+            </span>
+          {/if}
+          {#if Object.values(filters).some((value) => value)}
+            <span class="separator" aria-hidden="true">•</span>
+            <span class="badge" title="Active filters applied">Filters active</span>
+          {/if}
+        </p>
       </div>
-      <div class="actions">
+      <div class="actions" role="toolbar" aria-label="Table actions">
         <label class="batch-toggle">
           <input type="checkbox" bind:checked={batchMode}>
           <span>Batch mode</span>
         </label>
-        <button class="primary" on:click={addRow}>Add row</button>
-        <button on:click={deleteSelected} disabled={!rows.some((row) => row.selected)}>Delete selected</button>
-        <button on:click={requestRefresh}>Refresh</button>
-        <button on:click={requestPreview}>Preview SQL</button>
-        <button class="accent" on:click={requestExecution} disabled={executing}>Execute</button>
-        <button class="link" on:click={clearFilters} disabled={Object.values(filters).every((value) => !value)}>
+        <button type="button" class="ps-btn ps-btn--primary" on:click={addRow}>Add row</button>
+        <button
+          type="button"
+          class="ps-btn ps-btn--ghost"
+          on:click={deleteSelected}
+          disabled={!rows.some((row) => row.selected)}
+        >
+          Delete selected
+        </button>
+        <button type="button" class="ps-btn" on:click={requestRefresh}>Refresh</button>
+        <button type="button" class="ps-btn ps-btn--ghost" on:click={requestPreview}>Preview SQL</button>
+        <button
+          type="button"
+          class="ps-btn ps-btn--accent"
+          on:click={requestExecution}
+          disabled={executing}
+        >
+          Execute
+        </button>
+        <button
+          type="button"
+          class="ps-btn ps-btn--link"
+          on:click={clearFilters}
+          disabled={Object.values(filters).every((value) => !value)}
+        >
           Clear filters
         </button>
       </div>
     </header>
 
     <section class="toolbar">
-      <div class="search">
+      <div class="toolbar-group toolbar-search">
         <input
           type="search"
           placeholder="Search this table…"
           bind:value={searchTerm}
           on:keydown={(event) => event.key === 'Enter' && executeSearch()}
         >
-        <button on:click={executeSearch}>Search</button>
+        <button type="button" class="ps-btn ps-btn--ghost" on:click={executeSearch}>Search</button>
       </div>
-      <div class="pagination">
-        <button on:click={() => requestPage(Math.max(currentPage - 1, 0))} disabled={currentPage === 0}>
+      <div class="toolbar-group pagination" role="navigation" aria-label="Pagination">
+        <button
+          type="button"
+          class="ps-btn ps-btn--ghost"
+          on:click={() => requestPage(Math.max(currentPage - 1, 0))}
+          disabled={currentPage === 0}
+        >
           Previous
         </button>
         <span>Page {currentPage + 1} · Rows {totalRows}</span>
         <button
+          type="button"
+          class="ps-btn ps-btn--ghost"
           on:click={() => requestPage(currentPage + 1)}
           disabled={(currentPage + 1) * paginationSize >= totalRows}
         >
@@ -841,7 +1005,7 @@
                 style={columnStyle(column)}
               >
                 <div class="column-header">
-                  <button class="header-button" on:click={() => toggleSort(column)}>
+                  <button type="button" class="header-button" on:click={() => toggleSort(column)}>
                     <span>{column.name}</span>
                     {#if primaryKey.includes(column.name)}
                       <span class="pk" title="Primary key">🔑</span>
@@ -904,7 +1068,12 @@
                   </td>
                 {:else if column.type === 'json' || column.type === 'jsonb'}
                   <td class={clsx('cell json', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
-                    <button class="json-button" disabled={row.deleted} on:click={() => openJsonEditor(row, column)}>
+                    <button
+                      type="button"
+                      class="ps-btn ps-btn--ghost json-button"
+                      disabled={row.deleted}
+                      on:click={() => openJsonEditor(row, column)}
+                    >
                       {#if row.current[column.name] === null}
                         <span class="null">NULL</span>
                       {:else}
@@ -918,16 +1087,17 @@
                   </td>
                 {:else}
                   <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
-                    <div style="display: flex; gap: 4px; align-items: center;">
+                    <div class="cell-edit">
                       <input
                         type="text"
                         value={formatCellValue(row.current[column.name], column)}
                         disabled={row.deleted}
                         on:input={(event) => handleTextInput(row, column, event)}
-                        style="flex: 1; min-width: 0;"
+                        class="cell-input"
                       >
                       <button
-                        class="text-expand-button"
+                        type="button"
+                        class="ps-btn ps-btn--icon text-expand-button"
                         disabled={row.deleted}
                         on:click={() => openTextEditor(row, column)}
                         title="Expand text editor"
@@ -940,7 +1110,9 @@
               {/each}
               <td class="row-actions">
                 {#if row.deleted}
-                  <button on:click={() => restoreRow(row)}>Restore</button>
+                  <button type="button" class="ps-btn ps-btn--ghost" on:click={() => restoreRow(row)}>
+                    Restore
+                  </button>
                 {/if}
               </td>
             </tr>
@@ -979,8 +1151,13 @@
           <p class="preview-status">No SQL changes to display.</p>
         {/if}
         <footer>
-          <button on:click={closeSqlPreview}>Cancel</button>
-          <button class="accent" on:click={executeFromPreview} disabled={executing || previewLoading}>
+          <button type="button" class="ps-btn" on:click={closeSqlPreview}>Cancel</button>
+          <button
+            type="button"
+            class="ps-btn ps-btn--accent"
+            on:click={executeFromPreview}
+            disabled={executing || previewLoading}
+          >
             Execute
           </button>
         </footer>
@@ -1003,8 +1180,8 @@
           <p class="error">{jsonError}</p>
         {/if}
         <footer>
-          <button on:click={closeJsonEditor}>Cancel</button>
-          <button class="accent" on:click={saveJsonDraft}>Save</button>
+          <button type="button" class="ps-btn" on:click={closeJsonEditor}>Cancel</button>
+          <button type="button" class="ps-btn ps-btn--accent" on:click={saveJsonDraft}>Save</button>
         </footer>
       </div>
     </div>
@@ -1021,8 +1198,8 @@
           spellcheck={false}
         ></textarea>
         <footer>
-          <button on:click={closeTextEditor}>Cancel</button>
-          <button class="accent" on:click={saveTextDraft}>Save</button>
+          <button type="button" class="ps-btn" on:click={closeTextEditor}>Cancel</button>
+          <button type="button" class="ps-btn ps-btn--accent" on:click={saveTextDraft}>Save</button>
         </footer>
       </div>
     </div>
@@ -1031,136 +1208,263 @@
 
 <style>
   .loading {
-    padding: 2rem;
+    padding: calc(var(--ps-spacing-xl) * 1.25);
     text-align: center;
-    color: var(--vscode-descriptionForeground);
+    color: var(--ps-text-secondary);
   }
 
   .container {
-    padding: 16px;
+    padding: var(--ps-spacing-lg);
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--ps-spacing-lg);
+    background: var(--ps-surface);
   }
 
   .header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--ps-spacing-lg);
+    padding: var(--ps-spacing-md) var(--ps-spacing-lg);
+    background: var(--ps-surface-subtle);
+    border: 1px solid var(--ps-border);
+    border-radius: var(--ps-radius-lg);
+    flex-wrap: wrap;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
   }
 
-  .header h2 {
+  .header-title {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ps-spacing-xs);
+    min-width: 220px;
+  }
+
+  .header-title h2 {
     margin: 0;
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     font-weight: 600;
-    color: var(--vscode-foreground);
+    color: var(--ps-text-primary);
+    display: flex;
+    align-items: baseline;
+    gap: var(--ps-spacing-xs);
   }
 
-  .header .table-name {
-    color: var(--vscode-textPreformat-foreground, var(--vscode-foreground));
+  .schema-name {
+    opacity: 0.9;
+  }
+
+  .delimiter {
+    opacity: 0.6;
+  }
+
+  .table-name {
+    color: var(--ps-accent-foreground);
+    background: var(--ps-accent-muted);
+    padding: 0 var(--ps-spacing-xs);
+    border-radius: var(--ps-radius-sm);
   }
 
   .subheader {
-    margin: 4px 0 0;
-    color: var(--vscode-descriptionForeground);
-    font-size: 0.85rem;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ps-spacing-xs);
+    color: var(--ps-text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .separator {
+    color: var(--ps-text-tertiary);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--ps-spacing-sm);
+    height: 22px;
+    border-radius: 999px;
+    background: var(--ps-accent-muted);
+    color: var(--ps-accent-foreground);
+    font-weight: 500;
+    font-size: 0.75rem;
+    letter-spacing: 0.01em;
   }
 
   .actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--ps-spacing-sm);
     flex-wrap: wrap;
   }
 
-  button {
-    padding: 6px 14px;
-    border-radius: 4px;
+  .batch-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ps-spacing-xs);
+    padding: var(--ps-spacing-xs) var(--ps-spacing-sm);
+    border-radius: var(--ps-radius-sm);
+    background: var(--ps-surface-muted);
+    color: var(--ps-text-secondary);
     border: 1px solid transparent;
-    background: var(--vscode-button-secondaryBackground, #3a3d41);
-    color: var(--vscode-button-foreground, #ffffff);
+    transition: border-color 160ms ease;
+  }
+
+  .batch-toggle:focus-within {
+    border-color: var(--ps-focus-ring);
+  }
+
+  .batch-toggle input {
+    width: 16px;
+    height: 16px;
+  }
+
+  .ps-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ps-spacing-2xs);
+    border-radius: var(--ps-radius-sm);
+    border: 1px solid transparent;
+    background: var(--ps-surface-subtle);
+    color: var(--ps-text-primary);
+    padding: calc(var(--ps-spacing-xs) + 2px) var(--ps-spacing-md);
     cursor: pointer;
-    transition: background 120ms ease;
+    transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
+      transform 160ms ease;
+    min-height: 30px;
+    text-decoration: none;
   }
 
-  button.link {
-    background: transparent;
-    color: var(--vscode-textLink-foreground, #3794ff);
-    padding: 0 6px;
+  .ps-btn:hover:enabled {
+    background: color-mix(in srgb, var(--ps-accent) 20%, var(--ps-surface-subtle));
   }
 
-  button.link:hover:enabled {
-    background: transparent;
-    text-decoration: underline;
+  .ps-btn:focus-visible {
+    outline: 2px solid var(--ps-focus-ring);
+    outline-offset: 1px;
   }
 
-  button:not(.link):hover:enabled {
-    background: var(--vscode-button-hoverBackground, #45494e);
+  .ps-btn:active:enabled {
+    transform: translateY(1px);
   }
 
-  button:disabled {
-    opacity: 0.45;
+  .ps-btn:disabled {
+    opacity: 0.55;
     cursor: not-allowed;
   }
 
-  button.primary {
-    background: var(--vscode-button-background, #0e639c);
+  .ps-btn--primary,
+  .ps-btn--accent {
+    background: var(--ps-accent);
+    color: var(--ps-accent-foreground);
+    border-color: var(--ps-accent-border);
   }
 
-  button.accent {
-    background: var(--vscode-button-background, #0e639c);
-    color: var(--vscode-button-foreground, #ffffff);
+  .ps-btn--accent:hover:enabled,
+  .ps-btn--primary:hover:enabled {
+    background: var(--ps-accent-hover);
+  }
+
+  .ps-btn--ghost {
+    background: transparent;
+    border-color: var(--ps-border);
+    color: var(--ps-text-primary);
+  }
+
+  .ps-btn--ghost:hover:enabled {
+    background: var(--ps-surface-muted);
+  }
+
+  .ps-btn--link {
+    background: transparent;
+    color: var(--vscode-textLink-foreground, #3794ff);
+    padding: var(--ps-spacing-xs) var(--ps-spacing-xs);
+  }
+
+  .ps-btn--link:hover:enabled {
+    text-decoration: underline;
+  }
+
+  .ps-btn--icon {
+    width: 28px;
+    height: 28px;
+    padding: var(--ps-spacing-2xs);
   }
 
   .toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
+    gap: var(--ps-spacing-md);
+    flex-wrap: wrap;
+    background: var(--ps-surface-subtle);
+    border: 1px solid var(--ps-border);
+    border-radius: var(--ps-radius-lg);
+    padding: var(--ps-spacing-sm) var(--ps-spacing-lg);
+  }
+
+  .toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-spacing-sm);
     flex-wrap: wrap;
   }
 
-  .search {
-    display: flex;
-    gap: 6px;
-    align-items: center;
+  .toolbar-search input[type='search'] {
+    min-width: 220px;
   }
 
   input[type='search'],
   input[type='text'] {
-    border-radius: 4px;
-    border: 1px solid var(--vscode-input-border, #3d3d3d);
-    background: var(--vscode-input-background, #252526);
-    color: var(--vscode-input-foreground, #f5f5f5);
-    padding: 6px 10px;
+    border-radius: var(--ps-radius-sm);
+    border: 1px solid var(--ps-border);
+    background: var(--ps-surface-elevated);
+    color: var(--ps-text-primary);
+    padding: var(--ps-spacing-xs) var(--ps-spacing-md);
     min-width: 140px;
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
+
+  input[type='search']:focus,
+  input[type='text']:focus {
+    border-color: var(--ps-focus-ring);
+    box-shadow: 0 0 0 1px var(--ps-focus-ring);
+    outline: none;
   }
 
   input[type='checkbox'] {
     width: 16px;
     height: 16px;
+    accent-color: var(--ps-accent);
+  }
+
+  input[type='checkbox']:focus-visible {
+    outline: 2px solid var(--ps-focus-ring);
+    outline-offset: 1px;
   }
 
   .pagination {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--vscode-descriptionForeground);
+    color: var(--ps-text-secondary);
   }
 
   .table-wrapper {
-    border: 1px solid var(--vscode-panel-border, #3d3d3d);
-    border-radius: 6px;
-    overflow-x: auto;
-    overflow-y: auto;
+    border: 1px solid var(--ps-border);
+    border-radius: var(--ps-radius-lg);
+    overflow: auto;
     max-width: 100%;
+    background: var(--ps-surface-subtle);
+    box-shadow: var(--ps-shadow-soft);
+    position: relative;
   }
 
   table {
     width: auto;
     min-width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 13px;
     table-layout: fixed;
   }
@@ -1170,36 +1474,111 @@
   }
 
   col.row-actions-column {
-    width: 90px;
+    width: 96px;
   }
 
   thead {
-    background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d2d);
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
   }
 
   th,
   td {
-    border-bottom: 1px solid var(--vscode-panel-border, #3d3d3d);
-    padding: 8px 10px;
+    border-bottom: 1px solid var(--ps-border);
+    padding: var(--ps-spacing-sm) var(--ps-spacing-md);
     text-align: left;
     vertical-align: middle;
   }
 
   td {
     overflow: hidden;
+    background: var(--ps-surface-subtle);
+    transition: background-color 160ms ease;
   }
 
   th {
     font-weight: 600;
-    color: var(--vscode-titleBar-activeForeground, #f5f5f5);
-    background: var(--vscode-editor-background, #1e1e1e);
+    color: var(--ps-text-primary);
+    background: var(--ps-surface-elevated);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .column-header {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-spacing-xs);
+    position: relative;
+  }
+
+  .column-header-cell {
+    position: relative;
+    padding-right: var(--ps-spacing-lg);
+  }
+
+  .column-header-cell small {
+    display: block;
+    margin-top: var(--ps-spacing-2xs);
+    color: var(--ps-text-tertiary);
+    font-weight: 400;
+    font-size: 0.75rem;
+  }
+
+  .header-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ps-spacing-2xs);
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+  }
+
+  .header-button:hover,
+  .header-button:focus-visible {
+    text-decoration: underline;
+  }
+
+  .pk {
+    font-size: 1rem;
+    opacity: 0.8;
+  }
+
+  .sort-indicator {
+    font-size: 0.75rem;
+    opacity: 0.85;
+  }
+
+  .filters th {
+    background: var(--ps-surface-elevated);
+  }
+
+  .filters input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  tbody tr {
+    transition: background-color 160ms ease, border-color 160ms ease;
   }
 
   tbody tr:hover {
-    background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
+    background: var(--ps-selection);
+  }
+
+  tbody tr:hover td {
+    background: var(--ps-selection);
+  }
+
+  tbody tr:hover td.cell.modified {
+    background: color-mix(in srgb, var(--ps-accent) 32%, var(--ps-selection));
+  }
+
+  tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--ps-surface-subtle) 85%, transparent);
   }
 
   .select-cell {
@@ -1207,17 +1586,12 @@
     text-align: center;
   }
 
-  .cell input[type='text'] {
-    width: 100%;
-    box-sizing: border-box;
-  }
-
   .cell.modified {
-    background: rgba(83, 161, 249, 0.15);
+    background: color-mix(in srgb, var(--ps-accent) 24%, transparent);
   }
 
   tr.modified td.select-cell {
-    border-left: 4px solid var(--vscode-charts-blue, #3794ff);
+    border-left: 4px solid var(--ps-focus-ring);
   }
 
   tr.deleted {
@@ -1225,89 +1599,38 @@
     text-decoration: line-through;
   }
 
-  .row-actions {
-    width: 90px;
-    text-align: right;
-    white-space: nowrap;
-  }
-
-  .empty {
-    text-align: center;
-    padding: 24px;
-    color: var(--vscode-descriptionForeground);
-  }
-
-  .column-header {
+  .cell-edit {
     display: flex;
     align-items: center;
-    gap: 6px;
-    position: relative;
+    gap: var(--ps-spacing-2xs);
   }
 
-  .column-header-cell {
-    position: relative;
-    padding-right: 12px;
+  .cell-input {
+    flex: 1;
+    min-width: 0;
   }
 
-  .header-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: transparent;
-    color: inherit;
-    padding: 2px 0;
-    border: none;
-    cursor: pointer;
-    font: inherit;
+  .ps-btn--icon.text-expand-button {
+    border-color: var(--ps-border);
   }
 
-  .header-button:hover {
-    text-decoration: underline;
+  .ps-btn--icon.text-expand-button:hover:enabled {
+    border-color: var(--ps-focus-ring);
   }
 
-  .pk {
-    font-size: 1rem;
-    filter: grayscale(20%);
-  }
-
-  .sort-indicator {
-    font-size: 0.75rem;
-    opacity: 0.8;
+  .json {
+    font-family: var(--vscode-editor-font-family, monospace);
   }
 
   .json-button {
     width: 100%;
     justify-content: flex-start;
-    background: transparent;
-    border: 1px solid var(--vscode-input-border, #3d3d3d);
-    color: inherit;
     text-align: left;
-    padding: 6px 10px;
+    border-color: var(--ps-border);
   }
 
-  .text-expand-button {
-    flex-shrink: 0;
-    padding: 4px 8px;
-    background: var(--vscode-button-secondaryBackground, #3a3d41);
-    border: 1px solid var(--vscode-input-border, #3d3d3d);
-    color: inherit;
-    cursor: pointer;
-    border-radius: 3px;
-    font-size: 14px;
-    line-height: 1;
-  }
-
-  .text-expand-button:hover:enabled {
-    background: var(--vscode-button-hoverBackground, #45494e);
-  }
-
-  .text-expand-button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .json {
-    font-family: var(--vscode-editor-font-family, monospace);
+  .json-button:hover:enabled {
+    border-color: var(--ps-focus-ring);
   }
 
   .json .null {
@@ -1315,35 +1638,40 @@
     font-style: italic;
   }
 
+  .row-actions {
+    width: 96px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .empty {
+    text-align: center;
+    padding: var(--ps-spacing-xl);
+    color: var(--ps-text-secondary);
+  }
+
+  .feedback {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ps-spacing-sm);
+  }
+
   .message {
-    padding: 10px 12px;
-    border-radius: 4px;
-    margin-top: 10px;
+    padding: var(--ps-spacing-sm) var(--ps-spacing-md);
+    border-radius: var(--ps-radius-md);
+    border: 1px solid transparent;
+    background: var(--ps-surface-subtle);
+    color: var(--ps-text-primary);
   }
 
   .message.success {
-    background: rgba(64, 200, 130, 0.15);
-    border: 1px solid rgba(64, 200, 130, 0.3);
+    background: var(--ps-success-bg);
+    border-color: var(--ps-success-border);
   }
 
   .message.error {
-    background: rgba(232, 70, 80, 0.2);
-    border: 1px solid rgba(232, 70, 80, 0.35);
-  }
-
-  .filters th {
-    background: var(--vscode-editor-background, #1e1e1e);
-    border-bottom: 1px solid var(--vscode-panel-border, #3d3d3d);
-  }
-
-  .filters input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 4px 8px;
-    border-radius: 4px;
-    border: 1px solid var(--vscode-input-border, #3d3d3d);
-    background: var(--vscode-input-background, #252526);
-    color: var(--vscode-input-foreground, #f5f5f5);
+    background: var(--ps-danger-bg);
+    border-color: var(--ps-danger-border);
   }
 
   .resize-handle {
@@ -1353,7 +1681,7 @@
     width: 8px;
     height: 100%;
     cursor: col-resize;
-    z-index: 10;
+    z-index: 3;
     touch-action: none;
   }
 
@@ -1366,29 +1694,24 @@
     width: 2px;
     background: transparent;
     transform: translateX(-50%);
-    transition: background 0.15s ease;
+    transition: background-color 160ms ease;
   }
 
   .resize-handle:hover::before {
-    background: var(--vscode-list-highlightForeground, rgba(100, 150, 255, 0.6));
+    background: var(--ps-focus-ring);
   }
 
   .resize-handle:active::before {
-    background: var(--vscode-list-activeSelectionForeground, rgba(100, 150, 255, 0.9));
-  }
-
-  details {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 4px;
-    padding: 6px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--ps-accent);
   }
 
   pre {
-    margin: 6px 0 0;
-    padding: 10px;
+    margin: 0;
+    padding: var(--ps-spacing-md);
     background: var(--vscode-terminal-background, #1e1e1e);
-    border-radius: 4px;
+    border-radius: var(--ps-radius-md);
+    border: 1px solid var(--ps-border);
+    max-height: 360px;
     overflow: auto;
   }
 
@@ -1399,70 +1722,123 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 999;
+    z-index: 1000;
+    backdrop-filter: blur(6px);
+    animation: fade-in 160ms ease forwards;
   }
 
   .modal-content {
     width: min(720px, 90vw);
-    background: var(--vscode-editor-background, #1e1e1e);
-    border-radius: 6px;
-    border: 1px solid var(--vscode-panel-border, #3d3d3d);
-    padding: 16px;
+    background: var(--ps-surface-elevated);
+    border-radius: var(--ps-radius-lg);
+    border: 1px solid var(--ps-border-strong);
+    padding: var(--ps-spacing-lg);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--ps-spacing-md);
+    box-shadow: var(--ps-shadow-soft);
+    animation: scale-in 160ms ease forwards;
   }
 
   .modal-content header h3 {
     margin: 0;
-    font-size: 1.2rem;
+    font-size: 1.25rem;
+    color: var(--ps-text-primary);
   }
 
   textarea {
     min-height: 280px;
     font-family: var(--vscode-editor-font-family, monospace);
-    background: var(--vscode-input-background, #252526);
-    color: var(--vscode-input-foreground, #f5f5f5);
-    border: 1px solid var(--vscode-input-border, #3d3d3d);
-    border-radius: 4px;
-    padding: 12px;
+    background: var(--ps-surface-subtle);
+    color: var(--ps-text-primary);
+    border: 1px solid var(--ps-border);
+    border-radius: var(--ps-radius-md);
+    padding: var(--ps-spacing-md);
     resize: vertical;
   }
 
+  textarea:focus {
+    border-color: var(--ps-focus-ring);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--ps-focus-ring);
+  }
+
   textarea.invalid {
-    border-color: rgba(232, 70, 80, 0.7);
+    border-color: var(--ps-danger-border);
   }
 
   .modal-content.preview-modal {
     width: min(900px, 95vw);
   }
 
-  .modal-content.preview-modal pre {
-    max-height: 360px;
-    overflow: auto;
-  }
-
   .preview-status {
     margin: 0;
-    color: var(--vscode-descriptionForeground);
+    color: var(--ps-text-secondary);
   }
 
   footer {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: var(--ps-spacing-sm);
   }
 
-  .batch-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--vscode-descriptionForeground);
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
-  .feedback {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+  @keyframes scale-in {
+    from {
+      transform: translateY(6px) scale(0.97);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0) scale(1);
+      opacity: 1;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .header,
+    .toolbar {
+      padding: var(--ps-spacing-md);
+    }
+
+    .actions {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .header-title h2 {
+      font-size: 1.3rem;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .header,
+    .toolbar,
+    .table-wrapper,
+    .modal-content {
+      border: 1px solid CanvasText;
+      box-shadow: none;
+    }
+
+    .ps-btn,
+    .json-button {
+      forced-color-adjust: none;
+      border-color: CanvasText;
+      background: Canvas;
+      color: CanvasText;
+    }
+
+    .badge {
+      border: 1px solid CanvasText;
+      background: Canvas;
+      color: CanvasText;
+    }
   }
 </style>

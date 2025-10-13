@@ -443,8 +443,11 @@ export class DataEditor {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'data-editor', 'main.js')
         );
-        const styleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'data-editor', 'main.css')
+        const baseStyleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'clsx.css')
+        );
+        const appStyleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css')
         );
 
         const nonce = this.getNonce();
@@ -458,7 +461,8 @@ export class DataEditor {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; font-src ${cspSource}; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${state.schemaName}.${state.tableName}</title>
-    <link rel="stylesheet" href="${styleUri}">
+    <link rel="stylesheet" href="${baseStyleUri}">
+    <link rel="stylesheet" href="${appStyleUri}">
 </head>
 <body>
     <div id="app">Loading…</div>

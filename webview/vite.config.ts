@@ -10,15 +10,19 @@ export default defineConfig({
   })],
   base: './',
   build: {
-    outDir: path.resolve(__dirname, '../media/data-editor'),
+    outDir: path.resolve(__dirname, '../media'),
     emptyOutDir: true,
     assetsDir: '.',
     sourcemap: false,
-    cssCodeSplit: false,
+    cssCodeSplit: true,
     rollupOptions: {
+      input: {
+        'data-editor/main': path.resolve(__dirname, './src/main.ts'),
+        'schema-designer/main': path.resolve(__dirname, './src/schema-designer/main.ts')
+      },
       output: {
-        entryFileNames: 'main.js',
-        assetFileNames: 'main[extname]',
+        entryFileNames: '[name].js',
+        assetFileNames: '[name][extname]',
         chunkFileNames: 'chunks/[name].js'
       }
     }

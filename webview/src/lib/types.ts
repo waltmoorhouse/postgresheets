@@ -53,3 +53,33 @@ export interface GridChangeDelete {
 }
 
 export type GridChange = GridChangeInsert | GridChangeUpdate | GridChangeDelete;
+
+export interface SchemaDesignerColumn {
+  id: string;
+  name: string;
+  originalName: string | null;
+  type: string;
+  nullable: boolean;
+  defaultValue: string | null;
+  comment: string | null;
+  isPrimaryKey: boolean;
+  isNew: boolean;
+  markedForDrop: boolean;
+}
+
+export interface SchemaDesignerInitialState {
+  schemaName: string;
+  tableName: string;
+  columns: SchemaDesignerColumn[];
+  typeOptions: string[];
+  primaryKey: {
+    columns: string[];
+    constraintName: string | null;
+  };
+}
+
+export interface SchemaDesignerPreviewPayload {
+  columns: SchemaDesignerColumn[];
+  useManualSql?: boolean;
+  sql?: string;
+}
