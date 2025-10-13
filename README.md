@@ -189,3 +189,32 @@ MIT License - Feel free to modify and distribute
 ## Support
 
 For issues or questions, review the code comments in each TypeScript file for detailed implementation notes.
+
+## Release Notes & Packaging
+
+### Recent Release Activity
+- Phase 6 (Testing & QA) completed: comprehensive Jest test coverage added; integration test scaffolding and documentation added. See `CHANGELOG.md` and `docs/TESTING.md` for full details.
+
+### Packaging
+To create a package (`.vsix`) for local distribution:
+
+```bash
+# Build webview and compile
+npm run build:webview
+npm run compile
+
+# Package extension
+npx vsce package
+```
+
+To publish to the Marketplace:
+
+1. Ensure `publisher` is set in `package.json`.
+2. Create a Personal Access Token (PAT) with Marketplace permissions.
+3. Run:
+
+```bash
+npx vsce publish
+```
+
+Note: Automated publishing requires securely storing a PAT as a secret in your CI system.

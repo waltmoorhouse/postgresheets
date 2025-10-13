@@ -151,9 +151,8 @@ describe('DataEditor Grid Operations', () => {
 
             const result = SqlGenerator.generateSql('public', 'weird', change);
 
-            // Column name should be quoted (note: SqlGenerator doesn't escape internal quotes in column names)
-            // This is actually a limitation - column names are quoted but internal quotes aren't doubled
-            expect(result.query).toContain('"user"name"');
+            // Column name should be quoted and internal double-quotes doubled by quoteIdentifier
+            expect(result.query).toContain('"user""name"');
         });
     });
 
@@ -177,9 +176,8 @@ describe('DataEditor Grid Operations', () => {
 
             const result = SqlGenerator.generateSql('public', 'my"table', change);
 
-            // Table name should be quoted (note: SqlGenerator doesn't escape internal quotes in table names)
-            // This is actually a limitation - table names are quoted but internal quotes aren't doubled
-            expect(result.query).toContain('"my"table"');
+            // Table name should be quoted and internal double-quotes doubled by quoteIdentifier
+            expect(result.query).toContain('"my""table"');
         });
     });
 

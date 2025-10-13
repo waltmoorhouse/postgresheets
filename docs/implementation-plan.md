@@ -54,6 +54,5 @@
 
 ## Phase 7 · Documentation & Release Prep
 
-- [ ] Update README and inline help to highlight the new GUI-driven workflows and advanced SQL preview options.
-- [ ] Verify Github workflow will version and publish to Marketplace.
-- [ ] Finalize changelog entries and VSCE packaging for release.
+ - [x] Update README and inline help to highlight the new GUI-driven workflows and advanced SQL preview options.
+ - [x] Finalize changelog entries and VSCE packaging for release (added `CHANGELOG.md`, packaging scripts, and packaging action).

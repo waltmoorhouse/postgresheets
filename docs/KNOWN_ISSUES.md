@@ -2,24 +2,7 @@
 
 ## Current Known Issues
 
-### 1. Identifier Escaping in SqlGenerator
-
-**Issue:** The `SqlGenerator` class does not properly escape double quotes within column or table names when generating SQL.
-
-**Impact:** 
-- Column names like `user"name` generate `"user"name"` instead of `"user""name"`
-- Table names like `my"table` generate `"my"table"` instead of `"my""table"`
-- This could cause SQL syntax errors if identifiers contain double quotes
-
-**Workaround:** Avoid using double quotes in column and table names.
-
-**Priority:** Medium
-
-**Planned Fix:** Phase 7 - Update `SqlGenerator` to use `quoteIdentifier` helper from `tableSqlBuilder.ts`
-
-**Code Location:** `src/sqlGenerator.ts` - lines 25-27, 32, 56, 65
-
-### 2. Limited Array Type Support
+### Limited Array Type Support
 
 **Issue:** PostgreSQL array types (e.g., `TEXT[]`, `INTEGER[]`) are displayed as JSON strings in the data grid.
 
@@ -33,7 +16,7 @@
 
 **Status:** Accepted limitation for current version
 
-### 3. Custom Enum Type Display
+### Custom Enum Type Display
 
 **Issue:** Custom ENUM types show as their string values without indication of valid options.
 
@@ -47,7 +30,7 @@
 
 **Status:** Accepted limitation - may add in future version
 
-### 4. Pagination Performance with Large Offsets
+### Pagination Performance with Large Offsets
 
 **Issue:** Pagination using `OFFSET` becomes slower with very large offset values (10,000+ rows).
 
@@ -61,7 +44,7 @@
 
 **Status:** Known PostgreSQL limitation - would require cursor-based pagination
 
-### 5. No Cross-Database Queries
+### No Cross-Database Queries
 
 **Issue:** Cannot query or compare data across multiple databases in the same connection.
 
@@ -239,16 +222,6 @@ If you encounter a bug or limitation not listed here:
    - Steps to reproduce
    - Expected vs actual behavior
    - Screenshots if applicable
-
-## Contributing
-
-Interested in fixing an issue or implementing a feature?
-
-1. Check the [Contributing Guide](../CONTRIBUTING.md)
-2. Look for issues labeled `good first issue` or `help wanted`
-3. Comment on the issue before starting work
-4. Follow the code style and testing guidelines
-5. Submit a pull request with tests
 
 ## Version History
 
