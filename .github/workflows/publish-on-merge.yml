@@ -50,9 +50,6 @@ jobs:
           tag: ${{ steps.bump-semver.outputs.new_version }}
           message: '${{ steps.bump-semver.outputs.new_version }}: PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.title }}'
 
-      - name: Install vsce
-        run: npm install -g vsce
-
       - name: Install dependencies
         run: npm ci
 
