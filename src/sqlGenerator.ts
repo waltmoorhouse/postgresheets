@@ -5,9 +5,11 @@ export interface SqlResult {
     values: any[];
 }
 
+import { quoteIdentifier } from './tableSqlBuilder';
+
 export class SqlGenerator {
     static generateSql(schemaName: string, tableName: string, change: any): SqlResult {
-        const fullTableName = `"${schemaName}"."${tableName}"`;
+        const fullTableName = `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
 
         switch (change.type) {
             case 'insert':
@@ -26,7 +28,7 @@ export class SqlGenerator {
         const values = Object.values(data);
         const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
         
-        const columnList = columns.map(c => `"${c}"`).join(', ');
+    const columnList = columns.map(c => quoteIdentifier(c)).join(', ');
         const query = `INSERT INTO ${tableName} (${columnList}) VALUES (${placeholders})`;
         
         return { query, values };
@@ -40,11 +42,11 @@ export class SqlGenerator {
         const whereValues = Object.values(where);
         
         const setClause = dataColumns
-            .map((col, i) => `"${col}" = $${i + 1}`)
+            .map((col, i) => `${quoteIdentifier(col)} = $${i + 1}`)
             .join(', ');
         
         const whereClause = whereColumns
-            .map((col, i) => `"${col}" = $${dataValues.length + i + 1}`)
+            .map((col, i) => `${quoteIdentifier(col)} = $${dataValues.length + i + 1}`)
             .join(' AND ');
         
         const query = `UPDATE ${tableName} SET ${setClause} WHERE ${whereClause}`;
@@ -58,7 +60,7 @@ export class SqlGenerator {
         const whereValues = Object.values(where);
         
         const whereClause = whereColumns
-            .map((col, i) => `"${col}" = $${i + 1}`)
+            .map((col, i) => `${quoteIdentifier(col)} = $${i + 1}`)
             .join(' AND ');
         
         const query = `DELETE FROM ${tableName} WHERE ${whereClause}`;

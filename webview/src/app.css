@@ -1,0 +1,190 @@
+
+:root {
+  font-family: var(--vscode-font-family, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--vscode-foreground, #e7e7e7);
+  background-color: var(--vscode-editor-background, #1e1e1e);
+
+  --ps-spacing-2xs: 4px;
+  --ps-spacing-xs: 6px;
+  --ps-spacing-sm: 8px;
+  --ps-spacing-md: 12px;
+  --ps-spacing-lg: 16px;
+  --ps-spacing-xl: 24px;
+
+  --ps-radius-sm: 4px;
+  --ps-radius-md: 6px;
+  --ps-radius-lg: 8px;
+
+  --ps-shadow-soft: 0 12px 32px rgba(0, 0, 0, 0.28);
+
+  --ps-surface: var(--vscode-editor-background, #1e1e1e);
+  --ps-surface-subtle: var(--vscode-editorWidget-background, #252526);
+  --ps-surface-elevated: var(--vscode-sideBar-background, #2b2b2b);
+  --ps-surface-muted: color-mix(in srgb, var(--ps-surface) 85%, transparent);
+
+  --ps-border: var(--vscode-panel-border, rgba(123, 123, 123, 0.45));
+  --ps-border-strong: var(--vscode-editorWidget-border, rgba(191, 191, 191, 0.6));
+
+  --ps-accent: var(--vscode-button-background, #0e639c);
+  --ps-accent-hover: var(--vscode-button-hoverBackground, #1177bb);
+  --ps-accent-muted: color-mix(in srgb, var(--ps-accent) 32%, transparent);
+  --ps-accent-foreground: var(--vscode-button-foreground, #ffffff);
+  --ps-accent-border: var(--vscode-focusBorder, rgba(55, 148, 255, 0.65));
+
+  --ps-text-primary: var(--vscode-foreground, #f4f4f4);
+  --ps-text-secondary: var(--vscode-descriptionForeground, rgba(220, 220, 220, 0.8));
+  --ps-text-tertiary: var(--vscode-disabledForeground, rgba(220, 220, 220, 0.5));
+
+  --ps-focus-ring: var(--vscode-focusBorder, #3794ff);
+  --ps-selection: var(--vscode-list-activeSelectionBackground, rgba(88, 164, 255, 0.18));
+
+  --ps-danger-bg: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #61161f) 45%, transparent);
+  --ps-danger-border: var(--vscode-inputValidation-errorBorder, #f48771);
+  --ps-success-bg: color-mix(in srgb, var(--vscode-testing-iconPassed, #3fc56b) 35%, transparent);
+  --ps-success-border: color-mix(in srgb, var(--vscode-testing-iconPassed, #3fc56b) 60%, transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: var(--vscode-foreground, #1f2328);
+    background-color: var(--vscode-editor-background, #f3f3f3);
+
+    --ps-surface-subtle: var(--vscode-editorWidget-background, #ffffff);
+    --ps-surface-elevated: var(--vscode-sideBar-background, #f8f9fb);
+    --ps-border: var(--vscode-panel-border, rgba(0, 0, 0, 0.1));
+    --ps-border-strong: var(--vscode-editorWidget-border, rgba(0, 0, 0, 0.2));
+    --ps-shadow-soft: 0 12px 32px rgba(15, 23, 42, 0.12);
+    --ps-accent-muted: color-mix(in srgb, var(--ps-accent) 18%, transparent);
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --ps-border: CanvasText;
+    --ps-border-strong: CanvasText;
+    --ps-accent: Highlight;
+    --ps-accent-hover: HighlightText;
+    --ps-accent-foreground: Canvas;
+    --ps-focus-ring: Highlight;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background-color: var(--ps-surface);
+  color: var(--ps-text-primary);
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.ps-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ps-spacing-2xs);
+  border-radius: var(--ps-radius-sm);
+  border: 1px solid transparent;
+  background: var(--ps-surface-subtle);
+  color: var(--ps-text-primary);
+  padding: calc(var(--ps-spacing-xs) + 2px) var(--ps-spacing-md);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
+    transform 160ms ease;
+  min-height: 30px;
+  text-decoration: none;
+}
+
+.ps-btn:hover:enabled {
+  background: color-mix(in srgb, var(--ps-accent) 20%, var(--ps-surface-subtle));
+}
+
+.ps-btn:focus-visible {
+  outline: 2px solid var(--ps-focus-ring);
+  outline-offset: 1px;
+}
+
+.ps-btn:active:enabled {
+  transform: translateY(1px);
+}
+
+.ps-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ps-btn--primary,
+.ps-btn--accent {
+  background: var(--ps-accent);
+  color: var(--ps-accent-foreground);
+  border-color: var(--ps-accent-border);
+}
+
+.ps-btn--accent:hover:enabled,
+.ps-btn--primary:hover:enabled {
+  background: var(--ps-accent-hover);
+}
+
+.ps-btn--ghost {
+  background: transparent;
+  border-color: var(--ps-border);
+  color: var(--ps-text-primary);
+}
+
+.ps-btn--ghost:hover:enabled {
+  background: var(--ps-surface-muted);
+}
+
+.ps-btn--link {
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  padding: var(--ps-spacing-xs) var(--ps-spacing-xs);
+}
+
+.ps-btn--link:hover:enabled {
+  text-decoration: underline;
+}
+
+.ps-btn--icon {
+  width: 28px;
+  height: 28px;
+  padding: var(--ps-spacing-2xs);
+}
+
+.ps-btn--danger {
+  background: color-mix(in srgb, var(--ps-danger-bg) 42%, transparent);
+  border-color: var(--ps-danger-border);
+  color: var(--ps-text-primary);
+}
+
+.ps-btn--danger:hover:enabled {
+  background: color-mix(in srgb, var(--ps-danger-bg) 65%, transparent);
+}
+
+::selection {
+  background: var(--ps-selection);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

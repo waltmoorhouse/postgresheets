@@ -1,0 +1,13 @@
+# Exclude development-only assets and metadata from the VSIX bundle
+.vscode/
+.github/
+docs/**
+test/**
+webview/**
+src/**
+**/*.tsbuildinfo
+**/*.map
+npm-debug.log*
+tsconfig.json
+tsconfig.*.json
+jest.config.js
