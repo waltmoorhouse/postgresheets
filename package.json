@@ -197,7 +197,7 @@
     "jest": "^30.2.0",
     "ts-jest": "^29.4.4",
     "typescript": "^5.9.3",
-    "vite": "^7.1.9",
+    "vite": "^5.4.20",
     "vsce": "^2.15.0"
   },
   "dependencies": {
