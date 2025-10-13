@@ -1,5 +1,8 @@
 # Node.js dependencies
 node_modules/
+webview/node_modules/
+webview/dist/
+webview/.svelte-kit/
 
 # TypeScript build output
 out/

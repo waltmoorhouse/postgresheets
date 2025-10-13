@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "1.0.11",
+  "version": "1.0.18",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -181,10 +181,13 @@
   },
   "scripts": {
     "vscode:package": "npm run vscode:prepublish && npx vsce package",
-    "vscode:prepublish": "rm -rf out && npm run compile",
+    "vscode:prepublish": "npm run build:webview && rm -rf out && npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "jest"
+    "test": "jest",
+    "dev:webview": "npm --prefix webview run dev",
+    "build:webview": "npm --prefix webview run build",
+    "check:webview": "npm --prefix webview run check"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

@@ -1,0 +1,15 @@
+:root {
+  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+  color: var(--vscode-foreground, #e7e7e7);
+  background-color: var(--vscode-editor-background, #1e1e1e);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: inherit;
+}
+
+button {
+  font: inherit;
+}

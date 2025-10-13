@@ -15,38 +15,89 @@ interface PrimaryKeyInfo {
     columns: string[];
 }
 
+interface SortDescriptor {
+    column: string;
+    direction: 'asc' | 'desc';
+}
+
+type FilterMap = Record<string, string>;
+
+interface PanelState {
+    page: number;
+    sort: SortDescriptor | null;
+    filters: FilterMap;
+    searchTerm: string;
+}
+
+interface TableStatePayload {
+    schemaName: string;
+    tableName: string;
+    columns: ColumnInfo[];
+    primaryKey: PrimaryKeyInfo;
+    rows: Record<string, unknown>[];
+    currentPage: number;
+    totalRows: number;
+    paginationSize: number;
+    batchMode: boolean;
+    sort: SortDescriptor | null;
+    filters: FilterMap;
+    searchTerm: string;
+}
+
+interface GridChangeInsert {
+    type: 'insert';
+    data: Record<string, unknown>;
+}
+
+interface GridChangeUpdate {
+    type: 'update';
+    data: Record<string, unknown>;
+    where: Record<string, unknown>;
+}
+
+interface GridChangeDelete {
+    type: 'delete';
+    where: Record<string, unknown>;
+}
+
+type GridChange = GridChangeInsert | GridChangeUpdate | GridChangeDelete;
+
+interface WebviewMessage {
+    command: string;
+    payload?: unknown;
+    [key: string]: unknown;
+}
+
 export class DataEditor {
-    private panels: Map<string, vscode.WebviewPanel> = new Map();
+    private readonly context: vscode.ExtensionContext;
+    private readonly connectionManager: ConnectionManager;
+    private readonly panels = new Map<string, vscode.WebviewPanel>();
+    private readonly initializedPanels = new Set<vscode.WebviewPanel>();
+    private readonly panelState = new Map<vscode.WebviewPanel, PanelState>();
+    private paginationSize = 100;
+    private batchMode = true;
 
-    /**
-     * Default pagination size for table data.
-     */
-    private paginationSize: number = 100;
-
-    /**
-     * Default batch mode setting.
-     */
-    private batchMode: boolean = true;
-
-    constructor(
-        private context: vscode.ExtensionContext,
-        private connectionManager: ConnectionManager
-    ) {
-        // Load configuration settings
-        const config = vscode.workspace.getConfiguration('postgresDataEditor');
-        this.paginationSize = config.get<number>('paginationSize', 100);
-        this.batchMode = config.get<boolean>('batchMode', true);
+    constructor(context: vscode.ExtensionContext, connectionManager: ConnectionManager) {
+        this.context = context;
+        this.connectionManager = connectionManager;
     }
 
     async openTable(item: DatabaseTreeItem): Promise<void> {
-        const { connectionId, schemaName, tableName } = item;
-        if (!connectionId || !schemaName || !tableName) return;
+        const connectionId = item.connectionId;
+        const schemaName = item.schemaName;
+        const tableName = item.tableName;
 
-        const panelKey = `${connectionId}_${schemaName}_${tableName}`;
+        if (!connectionId || !schemaName || !tableName) {
+            vscode.window.showErrorMessage('Unable to open table - missing connection or table information.');
+            return;
+        }
 
-        // If panel already exists, reveal it
-        if (this.panels.has(panelKey)) {
-            this.panels.get(panelKey)!.reveal();
+        const panelKey = this.buildPanelKey(connectionId, schemaName, tableName);
+        const existingPanel = this.panels.get(panelKey);
+        if (existingPanel) {
+            existingPanel.reveal(vscode.ViewColumn.One);
+            const state = this.getPanelState(existingPanel);
+            await this.loadTableData(existingPanel, connectionId, schemaName, tableName, state.page);
             return;
         }
 
@@ -56,27 +107,49 @@ export class DataEditor {
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
             }
         );
 
         this.panels.set(panelKey, panel);
+        this.panelState.set(panel, this.createDefaultPanelState());
+
+        const messageDisposable = panel.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
+            await this.handleMessage(message, panel, connectionId, schemaName, tableName);
+        });
+        this.context.subscriptions.push(messageDisposable);
 
         panel.onDidDispose(() => {
+            messageDisposable.dispose();
             this.panels.delete(panelKey);
+            this.initializedPanels.delete(panel);
+            this.panelState.delete(panel);
         });
 
-        // Load table metadata and data
-        await this.loadTableData(panel, connectionId, schemaName, tableName);
+        await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+    }
 
-        // Handle messages from webview
-        panel.webview.onDidReceiveMessage(
-            async message => {
-                await this.handleMessage(message, panel, connectionId, schemaName, tableName);
-            },
-            undefined,
-            this.context.subscriptions
-        );
+    private buildPanelKey(connectionId: string, schemaName: string, tableName: string): string {
+        return `${connectionId}:${schemaName}.${tableName}`;
+    }
+
+    private createDefaultPanelState(): PanelState {
+        return {
+            page: 0,
+            sort: null,
+            filters: {},
+            searchTerm: ''
+        };
+    }
+
+    private getPanelState(panel: vscode.WebviewPanel): PanelState {
+        let state = this.panelState.get(panel);
+        if (!state) {
+            state = this.createDefaultPanelState();
+            this.panelState.set(panel, state);
+        }
+        return state;
     }
 
     private async loadTableData(
@@ -86,19 +159,49 @@ export class DataEditor {
         tableName: string,
         page: number = 0
     ): Promise<void> {
+        const state = this.getPanelState(panel);
+        state.page = page;
+
+        const payload = await this.fetchTableState(connectionId, schemaName, tableName, state);
+        if (!payload) {
+            return;
+        }
+
+        const webview = panel.webview;
+
+        if (!this.initializedPanels.has(panel)) {
+            panel.webview.html = this.buildWebviewHtml(webview, payload);
+            this.initializedPanels.add(panel);
+        } else {
+            webview.postMessage({
+                command: 'loadData',
+                payload
+            });
+        }
+    }
+
+    private async fetchTableState(
+        connectionId: string,
+        schemaName: string,
+        tableName: string,
+        state: PanelState
+    ): Promise<TableStatePayload | null> {
         const client = await this.connectionManager.getClient(connectionId);
-        if (!client) return;
+        if (!client) {
+            vscode.window.showErrorMessage('No active PostgreSQL connection. Please connect and try again.');
+            return null;
+        }
 
         this.connectionManager.markBusy(connectionId);
 
         try {
-            // Get columns info
-            const columnsResult = await client.query(`
-                SELECT column_name, data_type, is_nullable
-                FROM information_schema.columns
-                WHERE table_schema = $1 AND table_name = $2
-                ORDER BY ordinal_position
-            `, [schemaName, tableName]);
+            const columnsResult = await client.query(
+                `SELECT column_name, data_type, is_nullable
+                 FROM information_schema.columns
+                 WHERE table_schema = $1 AND table_name = $2
+                 ORDER BY ordinal_position`,
+                [schemaName, tableName]
+            );
 
             const columns: ColumnInfo[] = columnsResult.rows.map(row => ({
                 name: row.column_name,
@@ -106,69 +209,154 @@ export class DataEditor {
                 nullable: row.is_nullable === 'YES'
             }));
 
-            // Get primary key info
-            const pkResult = await client.query(`
-                SELECT a.attname
-                FROM pg_index i
-                JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-                WHERE i.indrelid = $1::regclass AND i.indisprimary
-            `, [`${schemaName}.${tableName}`]);
+            const pkResult = await client.query(
+                `SELECT a.attname
+                 FROM pg_index i
+                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                 WHERE i.indrelid = $1::regclass AND i.indisprimary`,
+                [`${schemaName}.${tableName}`]
+            );
 
             const primaryKey: PrimaryKeyInfo = {
                 columns: pkResult.rows.map(row => row.attname)
             };
 
-            // Get data with pagination
-            const offset = page * this.paginationSize;
-            const dataResult = await client.query(
-                `SELECT * FROM ${schemaName}.${tableName} LIMIT $1 OFFSET $2`,
-                [this.paginationSize, offset]
-            );
+            const offset = state.page * this.paginationSize;
+            const qualifiedTable = `${this.quoteIdentifier(schemaName)}.${this.quoteIdentifier(tableName)}`;
 
-            // Get total count
-            const countResult = await client.query(
-                `SELECT COUNT(*) FROM ${schemaName}.${tableName}`
-            );
-            const totalRows = parseInt(countResult.rows[0].count);
+            const { whereClause, values } = this.buildWhereClause(columns, state.filters, state.searchTerm);
 
-            panel.webview.html = this.getWebviewContent(
+            const columnNames = new Set(columns.map(column => column.name));
+            let sort = state.sort;
+            if (sort && !columnNames.has(sort.column)) {
+                sort = null;
+                state.sort = null;
+            }
+            const orderClause = sort
+                ? `ORDER BY ${this.quoteIdentifier(sort.column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
+                : '';
+
+            const limitPlaceholder = `$${values.length + 1}`;
+            const offsetPlaceholder = `$${values.length + 2}`;
+
+            const clauseSegments = [whereClause, orderClause].filter(segment => segment.length > 0).join(' ');
+            const clauseSql = clauseSegments.length > 0 ? ` ${clauseSegments}` : '';
+
+            const dataQuery = `SELECT * FROM ${qualifiedTable}${clauseSql} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`;
+            const dataValues = [...values, this.paginationSize, offset];
+            const dataResult = await client.query(dataQuery, dataValues);
+
+            const countQuery = `SELECT COUNT(*)::int AS total FROM ${qualifiedTable}${whereClause ? ` ${whereClause}` : ''}`;
+            const countResult = await client.query(countQuery, values);
+
+            const totalRows: number = countResult.rows[0]?.total ?? dataResult.rowCount ?? 0;
+
+            return {
                 schemaName,
                 tableName,
                 columns,
                 primaryKey,
-                dataResult.rows,
-                page,
-                totalRows
-            );
+                rows: dataResult.rows,
+                currentPage: state.page,
+                totalRows,
+                paginationSize: this.paginationSize,
+                batchMode: this.batchMode,
+                sort: state.sort,
+                filters: state.filters,
+                searchTerm: state.searchTerm
+            };
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load table data: ${error}`);
+            return null;
         } finally {
             this.connectionManager.markIdle(connectionId);
         }
     }
 
     private async handleMessage(
-        message: any,
+        message: WebviewMessage,
         panel: vscode.WebviewPanel,
         connectionId: string,
         schemaName: string,
         tableName: string
     ): Promise<void> {
-        switch (message.command) {
-            case 'loadPage':
-                await this.loadTableData(panel, connectionId, schemaName, tableName, message.page);
-                break;
+        if (!message || typeof message !== 'object') {
+            return;
+        }
 
-            case 'executeChanges':
-                await this.executeChanges(panel, connectionId, schemaName, tableName, message.changes, message.batchMode);
-                break;
+        const { command, payload } = message;
 
-            case 'previewSql':
-                await this.previewSql(panel, schemaName, tableName, message.changes, message.primaryKey);
+        switch (command) {
+            case 'loadPage': {
+                const page = Math.max(0, Number((payload as { page?: number })?.page ?? 0));
+                await this.loadTableData(panel, connectionId, schemaName, tableName, page);
                 break;
-
-            case 'search':
-                await this.searchTableData(panel, connectionId, schemaName, tableName, message.searchTerm);
+            }
+            case 'executeChanges': {
+                const changes = Array.isArray((payload as { changes?: GridChange[] })?.changes)
+                    ? (payload as { changes?: GridChange[] }).changes ?? []
+                    : [];
+                const batchMode = Boolean((payload as { batchMode?: boolean })?.batchMode);
+                await this.executeChanges(
+                    panel,
+                    connectionId,
+                    schemaName,
+                    tableName,
+                    changes,
+                    batchMode
+                );
+                break;
+            }
+            case 'previewSql': {
+                const changes = Array.isArray((payload as { changes?: GridChange[] })?.changes)
+                    ? (payload as { changes?: GridChange[] }).changes ?? []
+                    : [];
+                await this.previewSql(
+                    panel,
+                    schemaName,
+                    tableName,
+                    changes
+                );
+                break;
+            }
+            case 'search': {
+                const state = this.getPanelState(panel);
+                const rawTerm = typeof (payload as { searchTerm?: unknown })?.searchTerm === 'string'
+                    ? (payload as { searchTerm?: string }).searchTerm
+                    : '';
+                state.searchTerm = rawTerm ?? '';
+                state.page = 0;
+                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                break;
+            }
+            case 'applySort': {
+                const nextSort = (payload as { sort?: SortDescriptor | null })?.sort ?? null;
+                const state = this.getPanelState(panel);
+                state.sort = nextSort && nextSort.column && nextSort.direction ? nextSort : null;
+                state.page = 0;
+                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                break;
+            }
+            case 'applyFilters': {
+                const incoming = (payload as { filters?: FilterMap })?.filters ?? {};
+                const normalized: FilterMap = {};
+                for (const [key, value] of Object.entries(incoming)) {
+                    if (typeof value === 'string') {
+                        normalized[key] = value;
+                    }
+                }
+                const state = this.getPanelState(panel);
+                state.filters = normalized;
+                state.page = 0;
+                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                break;
+            }
+            case 'refresh': {
+                const state = this.getPanelState(panel);
+                await this.loadTableData(panel, connectionId, schemaName, tableName, state.page);
+                break;
+            }
+            default:
                 break;
         }
     }
@@ -178,11 +366,22 @@ export class DataEditor {
         connectionId: string,
         schemaName: string,
         tableName: string,
-        changes: any[],
-        batchMode: boolean = this.batchMode
+        changes: GridChange[],
+        batchMode: boolean
     ): Promise<void> {
+        this.batchMode = batchMode;
+
         const client = await this.connectionManager.getClient(connectionId);
-        if (!client) return;
+        if (!client) {
+            panel.webview.postMessage({ command: 'executionComplete', success: false, error: 'No connection available' });
+            return;
+        }
+
+        if (changes.length === 0) {
+            panel.webview.postMessage({ command: 'showMessage', text: 'No pending changes to execute.' });
+            panel.webview.postMessage({ command: 'executionComplete', success: true });
+            return;
+        }
 
         this.connectionManager.markBusy(connectionId);
 
@@ -200,17 +399,19 @@ export class DataEditor {
                 await client.query('COMMIT');
             }
 
-            vscode.window.showInformationMessage('Changes executed successfully');
             panel.webview.postMessage({ command: 'executionComplete', success: true });
-            
-            // Reload data
             await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
         } catch (error) {
             if (batchMode) {
-                await client.query('ROLLBACK');
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    console.error('Failed to rollback transaction', rollbackError);
+                }
             }
-            vscode.window.showErrorMessage(`Failed to execute changes: ${error}`);
-            panel.webview.postMessage({ command: 'executionComplete', success: false, error: String(error) });
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Failed to execute changes: ${errorMessage}`);
+            panel.webview.postMessage({ command: 'executionComplete', success: false, error: errorMessage });
         } finally {
             this.connectionManager.markIdle(connectionId);
         }
@@ -220,600 +421,98 @@ export class DataEditor {
         panel: vscode.WebviewPanel,
         schemaName: string,
         tableName: string,
-        changes: any[],
-        primaryKey: string[]
+        changes: GridChange[]
     ): Promise<void> {
-        const sqlStatements = changes.map(change => {
+        if (changes.length === 0) {
+            panel.webview.postMessage({ command: 'sqlPreview', payload: '/* No changes to preview */' });
+            return;
+        }
+
+        const statements = changes.map(change => {
             const sql = SqlGenerator.generateSql(schemaName, tableName, change);
             return SqlGenerator.formatSqlWithValues(sql.query, sql.values);
         });
 
         panel.webview.postMessage({
             command: 'sqlPreview',
-            sql: sqlStatements.join(';\n\n')
+            payload: statements.join(';\n\n')
         });
     }
 
-    private getWebviewContent(
-        schemaName: string,
-        tableName: string,
-        columns: ColumnInfo[],
-        primaryKey: PrimaryKeyInfo,
-        rows: any[],
-        currentPage: number,
-        totalRows: number
-    ): string {
-        const totalPages = Math.ceil(totalRows / this.paginationSize);
-        
+    private buildWebviewHtml(webview: vscode.Webview, state: TableStatePayload): string {
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'data-editor', 'main.js')
+        );
+        const styleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'data-editor', 'main.css')
+        );
+
+        const nonce = this.getNonce();
+        const initialState = JSON.stringify(state).replace(/</g, '\\u003c');
+        const cspSource = webview.cspSource;
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; font-src ${cspSource}; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${schemaName}.${tableName}</title>
-    <style>
-        body {
-            font-family: var(--vscode-font-family);
-            padding: 10px;
-            color: var(--vscode-foreground);
-            background-color: var(--vscode-editor-background);
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .controls {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        button {
-            background-color: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border: none;
-            padding: 6px 14px;
-            cursor: pointer;
-            border-radius: 2px;
-        }
-        button:hover {
-            background-color: var(--vscode-button-hoverBackground);
-        }
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .table-container {
-            overflow: auto;
-            max-height: calc(100vh - 200px);
-            border: 1px solid var(--vscode-panel-border);
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-        th, td {
-            padding: 8px;
-            text-align: left;
-            border: 1px solid var(--vscode-panel-border);
-        }
-        th {
-            background-color: var(--vscode-editor-background);
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            font-weight: 600;
-        }
-        tr:hover {
-            background-color: var(--vscode-list-hoverBackground);
-        }
-        .row-number {
-            width: 40px;
-            text-align: center;
-            background-color: var(--vscode-editorLineNumber-background);
-            color: var(--vscode-editorLineNumber-foreground);
-        }
-        .modified {
-            background-color: var(--vscode-diffEditor-insertedTextBackground);
-        }
-        .deleted {
-            text-decoration: line-through;
-            opacity: 0.6;
-        }
-        input[type="checkbox"] {
-            cursor: pointer;
-        }
-        .sql-preview {
-            margin-top: 20px;
-            padding: 10px;
-            background-color: var(--vscode-textCodeBlock-background);
-            border: 1px solid var(--vscode-panel-border);
-            border-radius: 3px;
-            font-family: var(--vscode-editor-font-family);
-            font-size: 12px;
-            white-space: pre-wrap;
-            max-height: 200px;
-            overflow: auto;
-        }
-        .pk-indicator {
-            color: var(--vscode-symbolIcon-keyForeground);
-            font-weight: bold;
-        }
-        .pagination {
-            margin-top: 10px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        [contenteditable="true"] {
-            min-width: 100px;
-            padding: 4px;
-        }
-        [contenteditable="true"]:focus {
-            outline: 2px solid var(--vscode-focusBorder);
-            background-color: var(--vscode-input-background);
-        }
-        .json-cell {
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            cursor: pointer;
-        }
-        .json-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-        }
-        .json-modal.active {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .json-modal-content {
-            background-color: var(--vscode-editor-background);
-            border: 1px solid var(--vscode-panel-border);
-            padding: 20px;
-            max-width: 80%;
-            max-height: 80%;
-            overflow: auto;
-            border-radius: 4px;
-        }
-        .json-editor {
-            width: 100%;
-            min-height: 300px;
-            font-family: var(--vscode-editor-font-family);
-            background-color: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border);
-            padding: 10px;
-        }
-    </style>
+    <title>${state.schemaName}.${state.tableName}</title>
+    <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
-    <div class="header">
-        <h2>${schemaName}.${tableName}</h2>
-        <div class="controls">
-            <label>
-                <input type="checkbox" id="batchMode" ${this.batchMode ? 'checked' : ''}> Batch Mode
-            </label>
-            <button id="addRow">Add Row</button>
-            <button id="deleteSelected">Delete Selected</button>
-            <button id="previewSql">Preview SQL</button>
-            <button id="execute">Execute Changes</button>
-            <input type="text" id="searchInput" placeholder="Search..." style="padding: 6px; width: 200px;">
-            <button id="searchButton">Search</button>
-        </div>
-    </div>
-
-    <div class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th class="row-number">
-                        <input type="checkbox" id="selectAll">
-                    </th>
-                    ${columns.map(col => `
-                        <th>
-                            ${col.name}
-                            ${primaryKey.columns.includes(col.name) ? '<span class="pk-indicator">🔑</span>' : ''}
-                            <br><small style="font-weight: normal; opacity: 0.7;">${col.type}</small>
-                        </th>
-                    `).join('')}
-                </tr>
-            </thead>
-            <tbody id="tableBody">
-                ${rows.map((row, idx) => `
-                    <tr data-row-index="${idx}" data-original='${JSON.stringify(row)}'>
-                        <td class="row-number">
-                            <input type="checkbox" class="row-select">
-                        </td>
-                        ${columns.map(col => {
-                            const value = row[col.name];
-                            const isJson = col.type === 'json' || col.type === 'jsonb';
-                            const isBool = col.type === 'boolean' || col.type === 'bool';
-                            const displayValue = value === null ? 'NULL' : 
-                                               isJson ? JSON.stringify(value) : 
-                                               String(value);
-
-                            if (isBool) {
-                                const checked = value === true || value === 't' || value === 1 ? 'checked' : '';
-                                return `
-                                    <td data-column="${col.name}" data-type="${col.type}">
-                                        <input type="checkbox" class="bool-cell" ${checked} />
-                                    </td>
-                                `;
-                            }
-
-                            return `
-                                <td 
-                                    contenteditable="true" 
-                                    data-column="${col.name}"
-                                    data-type="${col.type}"
-                                    class="${isJson ? 'json-cell' : ''}"
-                                >${displayValue}</td>
-                            `;
-                        }).join('')}
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    </div>
-
-    <div class="pagination">
-        <button id="prevPage" ${currentPage === 0 ? 'disabled' : ''}>Previous</button>
-        <span>Page ${currentPage + 1} of ${totalPages} (${totalRows} total rows)</span>
-        <button id="nextPage" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>Next</button>
-    </div>
-
-    <div id="sqlPreview" class="sql-preview" style="display: none;"></div>
-
-    <!-- JSON Editor Modal -->
-    <div id="jsonModal" class="json-modal">
-        <div class="json-modal-content">
-            <h3>Edit JSON</h3>
-            <textarea id="jsonEditor" class="json-editor"></textarea>
-            <div style="margin-top: 10px; display: flex; gap: 10px;">
-                <button id="saveJson">Save</button>
-                <button id="cancelJson">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const vscode = acquireVsCodeApi();
-        let changes = [];
-        let currentJsonCell = null;
-
-    const primaryKeyColumns = ${JSON.stringify(primaryKey.columns)};
-    const columnsMeta = ${JSON.stringify(columns)};
-    const currentPage = ${currentPage};
-
-        // Track text changes
-        document.getElementById('tableBody').addEventListener('input', (e) => {
-            if (e.target.contentEditable === 'true') {
-                e.target.classList.add('modified');
-            }
-        });
-
-        // Track checkbox changes (booleans)
-        document.getElementById('tableBody').addEventListener('change', (e) => {
-            if (e.target.classList && e.target.classList.contains('bool-cell')) {
-                // mark the containing cell as modified
-                const cell = e.target.closest('td');
-                if (cell) cell.classList.add('modified');
-            }
-        });
-
-        // JSON cell click
-        document.getElementById('tableBody').addEventListener('click', (e) => {
-            if (e.target.classList.contains('json-cell')) {
-                currentJsonCell = e.target;
-                const value = e.target.textContent;
-                document.getElementById('jsonEditor').value = value === 'NULL' ? '{}' : value;
-                document.getElementById('jsonModal').classList.add('active');
-            }
-        });
-
-        // Save JSON
-        document.getElementById('saveJson').addEventListener('click', () => {
-            try {
-                const jsonText = document.getElementById('jsonEditor').value;
-                JSON.parse(jsonText); // Validate
-                currentJsonCell.textContent = jsonText;
-                currentJsonCell.classList.add('modified');
-                document.getElementById('jsonModal').classList.remove('active');
-            } catch (error) {
-                alert('Invalid JSON: ' + error.message);
-            }
-        });
-
-        // Cancel JSON
-        document.getElementById('cancelJson').addEventListener('click', () => {
-            document.getElementById('jsonModal').classList.remove('active');
-        });
-
-        // Add row
-        document.getElementById('addRow').addEventListener('click', () => {
-            const tbody = document.getElementById('tableBody');
-            const newRow = document.createElement('tr');
-            newRow.classList.add('modified');
-            newRow.setAttribute('data-new', 'true');
-            
-            // Build row cells from columnsMeta to avoid nested template literal issues
-            const cellsHtml = columnsMeta.map(function(col) {
-                const isBool = col.type === 'boolean' || col.type === 'bool';
-                if (isBool) {
-                    return '<td data-column="' + col.name + '" data-type="' + col.type + '"><input type="checkbox" class="bool-cell" /></td>';
-                }
-                return '<td contenteditable="true" data-column="' + col.name + '" data-type="' + col.type + '"></td>';
-            }).join('');
-
-            newRow.innerHTML = '<td class="row-number">' +
-                '<input type="checkbox" class="row-select">' +
-                '</td>' + cellsHtml;
-            tbody.appendChild(newRow);
-        });
-
-        // Delete selected
-        document.getElementById('deleteSelected').addEventListener('click', () => {
-            const selected = document.querySelectorAll('.row-select:checked');
-            selected.forEach(checkbox => {
-                const row = checkbox.closest('tr');
-                if (row.getAttribute('data-new') === 'true') {
-                    row.remove();
-                } else {
-                    row.classList.add('deleted');
-                }
-            });
-        });
-
-        // Select all
-        document.getElementById('selectAll').addEventListener('change', (e) => {
-            document.querySelectorAll('.row-select').forEach(cb => {
-                cb.checked = e.target.checked;
-            });
-        });
-
-        // Preview SQL
-        document.getElementById('previewSql').addEventListener('click', () => {
-            const changes = collectChanges();
-            vscode.postMessage({
-                command: 'previewSql',
-                changes: changes,
-                primaryKey: primaryKeyColumns
-            });
-        });
-
-        // Execute changes
-        document.getElementById('execute').addEventListener('click', () => {
-            const changes = collectChanges();
-            if (changes.length === 0) {
-                alert('No changes to execute');
-                return;
-            }
-
-            const batchMode = document.getElementById('batchMode').checked;
-            vscode.postMessage({
-                command: 'executeChanges',
-                changes: changes,
-                batchMode: batchMode
-            });
-        });
-
-        // Pagination
-        document.getElementById('prevPage').addEventListener('click', () => {
-            vscode.postMessage({
-                command: 'loadPage',
-                page: currentPage - 1
-            });
-        });
-
-        document.getElementById('nextPage').addEventListener('click', () => {
-            vscode.postMessage({
-                command: 'loadPage',
-                page: currentPage + 1
-            });
-        });
-
-        // Search
-        document.getElementById('searchButton').addEventListener('click', () => {
-            const searchTerm = document.getElementById('searchInput').value;
-            vscode.postMessage({
-                command: 'search',
-                searchTerm: searchTerm
-            });
-        });
-
-        function collectChanges() {
-            const changes = [];
-            const rows = document.querySelectorAll('#tableBody tr');
-
-            rows.forEach(row => {
-                // New row
-                if (row.getAttribute('data-new') === 'true' && !row.classList.contains('deleted')) {
-                    const data = {};
-                    row.querySelectorAll('td[data-column]').forEach(cell => {
-                        const column = cell.getAttribute('data-column');
-                        const type = cell.getAttribute('data-type');
-                        const checkbox = cell.querySelector('input[type="checkbox"]');
-                        let value;
-                        if (checkbox) {
-                            value = checkbox.checked;
-                        } else {
-                            value = parseValue(cell.textContent, type);
-                        }
-                        data[column] = value;
-                    });
-                    changes.push({
-                        type: 'insert',
-                        data: data
-                    });
-                }
-                // Deleted row
-                else if (row.classList.contains('deleted')) {
-                    const original = JSON.parse(row.getAttribute('data-original'));
-                    const where = {};
-                    primaryKeyColumns.forEach(col => {
-                        where[col] = original[col];
-                    });
-                    changes.push({
-                        type: 'delete',
-                        where: where
-                    });
-                }
-                // Updated row
-                else if (row.querySelector('.modified')) {
-                    const original = JSON.parse(row.getAttribute('data-original'));
-                    const data = {};
-                    const where = {};
-                    
-                    primaryKeyColumns.forEach(col => {
-                        where[col] = original[col];
-                    });
-
-                    row.querySelectorAll('td[data-column]').forEach(cell => {
-                        if (cell.classList.contains('modified')) {
-                            const column = cell.getAttribute('data-column');
-                            const type = cell.getAttribute('data-type');
-                            const checkbox = cell.querySelector('input[type="checkbox"]');
-                            let value;
-                            if (checkbox) {
-                                value = checkbox.checked;
-                            } else {
-                                value = parseValue(cell.textContent, type);
-                            }
-                            data[column] = value;
-                        }
-                    });
-
-                    if (Object.keys(data).length > 0) {
-                        changes.push({
-                            type: 'update',
-                            data: data,
-                            where: where
-                        });
-                    }
-                }
-            });
-
-            return changes;
-        }
-
-        function parseValue(text, type) {
-            if (text === 'NULL' || text.trim() === '') {
-                return null;
-            }
-            
-            if (type === 'json' || type === 'jsonb') {
-                try {
-                    return JSON.parse(text);
-                } catch {
-                    return text;
-                }
-            }
-            
-            if (type.includes('int') || type === 'bigint' || type === 'smallint') {
-                return parseInt(text);
-            }
-            
-            if (type === 'numeric' || type === 'decimal' || type.includes('float') || type === 'real' || type === 'double precision') {
-                return parseFloat(text);
-            }
-            
-            if (type === 'boolean' || type === 'bool') {
-                return text.toLowerCase() === 'true' || text === '1';
-            }
-            
-            return text;
-        }
-
-        // Handle messages from extension
-        window.addEventListener('message', event => {
-            const message = event.data;
-            switch (message.command) {
-                case 'sqlPreview':
-                    const preview = document.getElementById('sqlPreview');
-                    preview.textContent = message.sql;
-                    preview.style.display = 'block';
-                    break;
-                case 'executionComplete':
-                    if (!message.success) {
-                        alert('Execution failed: ' + message.error);
-                    }
-                    break;
-                case 'updateTable':
-                    (function(){
-                        const tableBody = document.getElementById('tableBody');
-                        tableBody.innerHTML = message.rows.map(function(row, ridx) {
-                            const cells = columnsMeta.map(function(col) {
-                                const val = row[col.name];
-                                const isJson = col.type === 'json' || col.type === 'jsonb';
-                                const isBool = col.type === 'boolean' || col.type === 'bool';
-                                if (isBool) {
-                                    const checked = val === true || val === 't' || val === 1 ? 'checked' : '';
-                                    return '<td data-column="' + col.name + '" data-type="' + col.type + '"><input type="checkbox" class="bool-cell" ' + checked + ' /></td>';
-                                }
-                                const display = val === null ? 'NULL' : (isJson ? JSON.stringify(val) : String(val));
-                                return '<td contenteditable="true" data-column="' + col.name + '" data-type="' + col.type + '">' + display + '</td>';
-                            }).join('');
-
-                            const original = JSON.stringify(row).replace(/'/g, "\u0027");
-                            return '<tr data-row-index="' + ridx + '" data-original=\'' + original + '\'>' +
-                                '<td class="row-number"><input type="checkbox" class="row-select"></td>' + cells + '</tr>';
-                        }).join('');
-                    })();
-                    break;
-            }
-        });
+    <div id="app">Loading…</div>
+    <script nonce="${nonce}">
+        window.initialState = ${initialState};
+        window.acquireVsCodeApi = acquireVsCodeApi;
     </script>
+    <script src="${scriptUri}" nonce="${nonce}" type="module"></script>
 </body>
 </html>`;
     }
 
-    private async searchTableData(
-        panel: vscode.WebviewPanel,
-        connectionId: string,
-        schemaName: string,
-        tableName: string,
+    private quoteIdentifier(value: string): string {
+        return '"' + value.replace(/"/g, '""') + '"';
+    }
+
+    private buildWhereClause(
+        columns: ColumnInfo[],
+        filters: FilterMap,
         searchTerm: string
-    ): Promise<void> {
-        const client = await this.connectionManager.getClient(connectionId);
-        if (!client) return;
+    ): { whereClause: string; values: unknown[] } {
+        const clauses: string[] = [];
+        const values: unknown[] = [];
+        let paramIndex = 1;
+        const validColumns = new Set(columns.map(column => column.name));
 
-        this.connectionManager.markBusy(connectionId);
-
-        try {
-            // Fetch column metadata to dynamically build the query
-            const columnsResult = await client.query(
-                `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`,
-                [schemaName, tableName]
-            );
-            const columns = columnsResult.rows.map(row => row.column_name);
-
-            const query = `
-                SELECT * FROM ${schemaName}.${tableName}
-                WHERE ${columns.map(col => `CAST("${col}" AS TEXT) ILIKE $1`).join(' OR ')}
-                LIMIT $2 OFFSET $3
-            `;
-            const offset = 0;
-            const result = await client.query(query, [`%${searchTerm}%`, this.paginationSize, offset]);
-
-            panel.webview.postMessage({
-                command: 'updateTable',
-                rows: result.rows
-            });
-        } catch (error) {
-            vscode.window.showErrorMessage(`Search failed: ${error}`);
-        } finally {
-            this.connectionManager.markIdle(connectionId);
+        for (const [columnName, rawValue] of Object.entries(filters ?? {})) {
+            if (!validColumns.has(columnName)) {
+                continue;
+            }
+            const value = typeof rawValue === 'string' ? rawValue.trim() : '';
+            if (!value) {
+                continue;
+            }
+            const placeholder = `$${paramIndex++}`;
+            clauses.push(`CAST(${this.quoteIdentifier(columnName)} AS TEXT) ILIKE ${placeholder}`);
+            values.push(`%${value}%`);
         }
+
+        const searchValue = typeof searchTerm === 'string' ? searchTerm.trim() : '';
+        if (searchValue) {
+            const placeholderIndex = paramIndex++;
+            const placeholder = `$${placeholderIndex}`;
+            const columnClauses = columns.map(column => `CAST(${this.quoteIdentifier(column.name)} AS TEXT) ILIKE ${placeholder}`);
+            clauses.push(`(${columnClauses.join(' OR ')})`);
+            values.push(`%${searchValue}%`);
+        }
+
+        const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+        return { whereClause, values };
+    }
+
+    private getNonce(): string {
+        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        return Array.from({ length: 32 }, () => possible.charAt(Math.floor(Math.random() * possible.length))).join('');
     }
 }
