@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "1.0.25",
+  "version": "1.0.27",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -205,6 +205,11 @@
     "transform": {
       "^.+\\.tsx?$": "ts-jest"
     },
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/out/",
+      "/test/integration/"
+    ]
   }
 }

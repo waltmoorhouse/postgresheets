@@ -245,18 +245,20 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     }
 
     private formatStatusLabel(status: ConnectionStatus): string {
+        // Use compact colored dot indicators for the tree description while keeping
+        // the full textual status in tooltips for accessibility and clarity.
         switch (status) {
             case 'connected':
-                return 'Connected';
+                return '🟢';
             case 'busy':
-                return 'Working...';
+                return '🔵';
             case 'connecting':
-                return 'Connecting...';
+                return '🟡';
             case 'error':
-                return 'Error';
+                return '<blink>🔴</blink>';
             case 'disconnected':
             default:
-                return 'Disconnected';
+                return '🔴';
         }
     }
 

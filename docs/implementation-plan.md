@@ -40,21 +40,20 @@
 
 ## Phase 5 · Broader No-SQL Workflows
 
-- [ ] Audit all remaining commands requiring raw SQL input (create table, drop table, index management, custom queries).
-- [ ] For each, design graphical flows paralleling the schema designer (forms, wizards, previews) while preserving optional SQL editing panels.
-- [ ] Ensure every graphical workflow emits parameterized SQL via `SqlGenerator` or new builder utilities, maintaining injection safety.
-- [ ] Update command registrations and context menus to launch the new graphical experiences.
+- [x] Audit all remaining commands requiring raw SQL input (create table, drop table, index management, custom queries).
+- [x] For each, design graphical flows paralleling the schema designer (forms, wizards, previews) while preserving optional SQL editing panels.
+- [x] Ensure every graphical workflow emits parameterized SQL via `SqlGenerator` or new builder utilities, maintaining injection safety.
+- [x] Update command registrations and context menus to launch the new graphical experiences.
 
 ## Phase 6 · Testing & Quality Assurance
 
-- [ ] Expand Jest/Playwright coverage for the Svelte components (unit + integration tests for grid interactions, schema designer, filters).
-- [ ] Add end-to-end extension tests (using VS Code Extension Test Runner) to cover key scenarios: loading data with special characters, resizing columns, graphical alter table execution.
-- [ ] Perform manual regression passes across supported OS platforms (Windows, macOS, Linux) and VS Code versions (per engine requirement).
-- [ ] Document known limitations and backlog follow-ups discovered during QA.
+- [x] Expand Jest/Playwright coverage for the Svelte components (unit + integration tests for grid interactions, schema designer, filters).
+- [x] Add end-to-end extension tests (using VS Code Extension Test Runner) to cover key scenarios: loading data with special characters, resizing columns, graphical alter table execution.
+- [x] Perform manual regression passes across supported OS platforms (Windows, macOS, Linux) and VS Code versions (per engine requirement).
+- [x] Document known limitations and backlog follow-ups discovered during QA.
 
 ## Phase 7 · Documentation & Release Prep
 
 - [ ] Update README and inline help to highlight the new GUI-driven workflows and advanced SQL preview options.
-- [ ] Provide migration notes for existing users (e.g., configuration changes, new dependencies, recommended workflows).
-- [ ] Prepare marketing screenshots/gifs demonstrating the modernized UI and schema designer.
-- [ ] Finalize version bump, changelog entries, and VSCE packaging for release.
+- [ ] Verify Github workflow will version and publish to Marketplace.
+- [ ] Finalize changelog entries and VSCE packaging for release.
