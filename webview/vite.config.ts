@@ -1,13 +1,16 @@
 import { defineConfig } from 'vite';
-import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import path from 'node:path';
 
 export default defineConfig({
-  plugins: [svelte({
-    compilerOptions: {
-      hydratable: true
-    }
-  })],
+  plugins: [
+    svelte({
+      preprocess: vitePreprocess(),
+      compilerOptions: {
+        hydratable: true
+      }
+    })
+  ],
   base: './',
   build: {
     outDir: path.resolve(__dirname, '../media'),
