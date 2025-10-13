@@ -4,6 +4,13 @@ on:
   pull_request:
     types: [closed]
 
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: read
+  issues: read
+  statuses: write
+
 jobs:
   publish-on-merge:
     if: github.event.pull_request.merged == true
