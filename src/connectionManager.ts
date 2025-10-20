@@ -173,21 +173,60 @@ export class ConnectionManager {
         const config = connections.find(c => c.id === id);
         if (!config) return;
 
-        const confirm = await vscode.window.showWarningMessage(
-            `Delete connection "${config.name}"?`,
-            'Delete',
-            'Cancel'
-        );
+        const status = this.getConnectionStatus(id);
 
-        if (confirm === 'Delete') {
-            const filtered = connections.filter(c => c.id !== id);
-            await this.context.globalState.update('connections', filtered);
-            await this.context.secrets.delete(`postgres-password-${id}`);
-            
-            await this.disconnect(id);
+        // If the connection is currently connecting/connected/busy, ask the
+        // user whether to disconnect (or cancel) and delete. For simple
+        // disconnected entries, proceed with a normal delete confirmation.
+        if (status === 'connecting') {
+            const confirm = await vscode.window.showWarningMessage(
+                `Connection "${config.name}" is currently connecting. Disconnect and delete?`,
+                'Disconnect & Delete',
+                'Cancel'
+            );
 
-            vscode.window.showInformationMessage(`Connection "${config.name}" deleted`);
+            if (confirm !== 'Disconnect & Delete') return;
+
+            // Cancel the in-flight connect (best-effort) and ensure any
+            // existing client is closed.
+            try {
+                await this.cancelConnect(id);
+                await this.disconnect(id);
+            } catch (err) {
+                vscode.window.showErrorMessage(`Failed to cancel connection: ${err}`);
+                return;
+            }
+        } else if (status === 'connected' || status === 'busy') {
+            const confirm = await vscode.window.showWarningMessage(
+                `Connection "${config.name}" is currently connected. Disconnect and delete?`,
+                'Disconnect & Delete',
+                'Cancel'
+            );
+
+            if (confirm !== 'Disconnect & Delete') return;
+
+            try {
+                await this.disconnect(id);
+            } catch (err) {
+                vscode.window.showErrorMessage(`Failed to disconnect: ${err}`);
+                return;
+            }
+        } else {
+            const confirm = await vscode.window.showWarningMessage(
+                `Delete connection "${config.name}"?`,
+                'Delete',
+                'Cancel'
+            );
+            if (confirm !== 'Delete') return;
         }
+
+        // Remove stored configuration and secrets after ensuring there are
+        // no active or pending connections for the id.
+        const filtered = connections.filter(c => c.id !== id);
+        await this.context.globalState.update('connections', filtered);
+        await this.context.secrets.delete(`postgres-password-${id}`);
+
+        vscode.window.showInformationMessage(`Connection "${config.name}" deleted`);
     }
 
     /**

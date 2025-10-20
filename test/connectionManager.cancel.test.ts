@@ -1,26 +1,5 @@
-// Provide a minimal mock of the VS Code API so ConnectionManager can be
-// imported and exercised under Jest.
-jest.mock('vscode', () => {
-    const EventEmitter = class {
-        event: any;
-        constructor() { this.event = () => () => {}; }
-        fire() {}
-    };
-
-    return {
-        EventEmitter,
-        window: {
-            showInputBox: jest.fn(),
-            showInformationMessage: jest.fn(),
-            showErrorMessage: jest.fn(),
-            showQuickPick: jest.fn(),
-            withProgress: jest.fn((opts: any, cb: any) => cb({ report: () => {} }, { onCancellationRequested: () => {} }))
-        },
-        commands: { executeCommand: jest.fn() },
-        ThemeIcon: class {},
-        ProgressLocation: { Notification: 15 }
-    };
-});
+// Use the manual mock in test/__mocks__/vscode.ts
+jest.mock('vscode');
 
 import { ConnectionManager } from '../src/connectionManager';
 import * as vscode from 'vscode';
@@ -86,5 +65,80 @@ describe('ConnectionManager cancelConnect', () => {
         // The connect should resolve to null after cancellation
         const client = await connectPromise;
         expect(client).toBeNull();
+    });
+
+    test('deleteConnection cancels connecting attempt and deletes config', async () => {
+        const ctx = makeContext();
+        const mgr = new ConnectionManager(ctx);
+
+        const config = { id: 'del1', name: 'to-delete', host: 'localhost', port: 5432, database: 'db', username: 'user' };
+        (ctx.globalState.get as jest.Mock).mockReturnValue([config]);
+        (ctx.secrets.get as jest.Mock).mockResolvedValue('pass');
+
+        // Spy on update/delete calls
+        const updateSpy = jest.spyOn(ctx.globalState, 'update' as any);
+        const secretDeleteSpy = jest.spyOn(ctx.secrets, 'delete' as any);
+
+        // Make sure warning shows 'Disconnect & Delete'
+        jest.spyOn(vscode.window, 'showWarningMessage' as any).mockResolvedValue('Disconnect & Delete');
+
+        // Start a hanging connect
+        const p = mgr.connect(config.id, false);
+        await new Promise((r) => setTimeout(r, 20));
+
+        // Now request delete - should cancel and then delete
+        await mgr.deleteConnection(config.id);
+
+        expect(updateSpy).toHaveBeenCalledWith('connections', []);
+        expect(secretDeleteSpy).toHaveBeenCalledWith(`postgres-password-${config.id}`);
+
+        const result = await p;
+        expect(result).toBeNull();
+    });
+
+    test('deleteConnection disconnects active client and deletes config', async () => {
+        const ctx = makeContext();
+        const mgr = new ConnectionManager(ctx);
+
+        const config = { id: 'del2', name: 'to-delete-conn', host: 'localhost', port: 5432, database: 'db', username: 'user' };
+        (ctx.globalState.get as jest.Mock).mockReturnValue([config]);
+        (ctx.secrets.get as jest.Mock).mockResolvedValue('pass');
+
+        const updateSpy = jest.spyOn(ctx.globalState, 'update' as any);
+        const secretDeleteSpy = jest.spyOn(ctx.secrets, 'delete' as any);
+
+        // Simulate an active client
+        const fakeClient = { end: jest.fn(async () => {}) } as any;
+        (mgr as any).connections.set(config.id, fakeClient);
+        (mgr as any).connectionStatuses.set(config.id, 'connected');
+
+        jest.spyOn(vscode.window, 'showWarningMessage' as any).mockResolvedValue('Disconnect & Delete');
+
+        await mgr.deleteConnection(config.id);
+
+        expect(fakeClient.end).toHaveBeenCalled();
+        expect(updateSpy).toHaveBeenCalledWith('connections', []);
+        expect(secretDeleteSpy).toHaveBeenCalledWith(`postgres-password-${config.id}`);
+        expect((mgr as any).connections.has(config.id)).toBe(false);
+    });
+
+    test('deleteConnection does not delete when user cancels', async () => {
+        const ctx = makeContext();
+        const mgr = new ConnectionManager(ctx);
+
+        const config = { id: 'del3', name: 'no-delete', host: 'localhost', port: 5432, database: 'db', username: 'user' };
+        (ctx.globalState.get as jest.Mock).mockReturnValue([config]);
+        (ctx.secrets.get as jest.Mock).mockResolvedValue('pass');
+
+        const updateSpy = jest.spyOn(ctx.globalState, 'update' as any);
+        const secretDeleteSpy = jest.spyOn(ctx.secrets, 'delete' as any);
+
+        // User cancels the delete confirmation
+        jest.spyOn(vscode.window, 'showWarningMessage' as any).mockResolvedValue('Cancel');
+
+        await mgr.deleteConnection(config.id);
+
+        expect(updateSpy).not.toHaveBeenCalled();
+        expect(secretDeleteSpy).not.toHaveBeenCalled();
     });
 });

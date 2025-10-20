@@ -13,6 +13,9 @@ export class EventEmitter<T = any> {
 export const window = {
     showInputBox: (_opts?: any) => Promise.resolve(undefined),
     showInformationMessage: (_msg?: string) => undefined,
+    // showWarningMessage commonly returns the chosen button label; default
+    // to resolving undefined so tests can override behavior as needed.
+    showWarningMessage: (_msg?: string, ...items: string[]) => Promise.resolve(undefined as string | undefined),
     showErrorMessage: (_msg?: string) => undefined,
     showQuickPick: (_items?: any) => Promise.resolve(undefined),
     withProgress: async (_opts: any, cb: any) => cb({ report: () => {} }, { onCancellationRequested: (_: any) => {} })
