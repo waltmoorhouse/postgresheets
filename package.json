@@ -129,8 +129,7 @@
           "command": "postgres-editor.refreshExplorer",
           "when": "view == postgresExplorer",
           "group": "navigation"
-        }
-        ,
+        },
         {
           "command": "postgres-editor.cancelAllConnects",
           "when": "view == postgresExplorer && postgresHasConnecting",
@@ -222,7 +221,7 @@
     "ts-jest": "^29.4.4",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
-    "vsce": "^1.97.0"
+    "vsce": "^2.15.0"
   },
   "dependencies": {
     "pg": "^8.11.0"
