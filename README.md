@@ -13,6 +13,11 @@ A VSCode extension that lets you connect to PostgreSQL databases and edit table 
 - 👁️ **SQL Preview** - Preview generated SQL before execution
 - 📄 **Pagination** - Handle large tables with 100-row pagination
 
+## Discalimer
+
+This code was written with help from AI Coding Agents such as GitHub Copilot. I have performed code reviews and consider it safe enough to use on my machine. 
+However, when using code created with GenAI (or really when installing any VSCode extension, even if written by humans) you should do your own code/security review to ensure you trust the product.
+
 ## Installation
 
 ### Prerequisites

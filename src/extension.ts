@@ -10,6 +10,29 @@ export function activate(context: vscode.ExtensionContext) {
     console.log('PostgreSQL Data Editor extension is now active');
 
     const connectionManager = new ConnectionManager(context);
+    // Track connection attempts so we can expose a toolbar action when any
+    // connection is in the 'connecting' state.
+    const connectingSet = new Set<string>();
+
+    // Initialize toolbar context based on any existing connection statuses.
+    (async () => {
+        const configs = await connectionManager.getConnections();
+        for (const c of configs) {
+            if (connectionManager.getConnectionStatus(c.id) === 'connecting') {
+                connectingSet.add(c.id);
+            }
+        }
+        void vscode.commands.executeCommand('setContext', 'postgresHasConnecting', connectingSet.size > 0);
+    })();
+
+    connectionManager.onStatusChange((event) => {
+        if (event.status === 'connecting') {
+            connectingSet.add(event.id);
+        } else {
+            connectingSet.delete(event.id);
+        }
+        void vscode.commands.executeCommand('setContext', 'postgresHasConnecting', connectingSet.size > 0);
+    });
     const treeProvider = new DatabaseTreeProvider(connectionManager);
     const dataEditor = new DataEditor(context, connectionManager);
     const schemaDesigner = new SchemaDesigner(context, connectionManager);
@@ -100,11 +123,32 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const client = await connectionManager.connect(target.id, status === 'error');
-            if (client) {
-                vscode.window.showInformationMessage(`Connected to "${target.name}"`);
-                treeProvider.refresh();
-            }
+            // Show a cancellable progress notification while attempting to connect.
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `Connecting to "${target.name}"`,
+                cancellable: true
+            }, async (progress, token) => {
+                token.onCancellationRequested(() => {
+                    // Delegate cancellation to the ConnectionManager so it can
+                    // abort underlying socket attempts.
+                    connectionManager.cancelConnect(target.id);
+                });
+
+                const client = await connectionManager.connect(target.id, status === 'error');
+                if (client) {
+                    vscode.window.showInformationMessage(`Connected to "${target.name}"`);
+                    treeProvider.refresh();
+                } else {
+                    // If connect returned null and we are not connected, the
+                    // connection was either cancelled or failed — connectionManager
+                    // already set appropriate status and showed errors where needed.
+                    const newStatus = connectionManager.getConnectionStatus(target.id);
+                    if (newStatus === 'disconnected') {
+                        vscode.window.showInformationMessage(`Connection to "${target.name}" cancelled`);
+                    }
+                }
+            });
         }),
 
         vscode.commands.registerCommand('postgres-editor.disconnect', async (item?: DatabaseTreeItem) => {
@@ -120,11 +164,81 @@ export function activate(context: vscode.ExtensionContext) {
             const target = await resolveConnectionTarget(item);
             if (!target) return;
 
-            const client = await connectionManager.connect(target.id, true);
-            if (client) {
-                vscode.window.showInformationMessage(`Reconnected to "${target.name}"`);
-                treeProvider.refresh();
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `Reconnecting to "${target.name}"`,
+                cancellable: true
+            }, async (progress, token) => {
+                token.onCancellationRequested(() => {
+                    connectionManager.cancelConnect(target.id);
+                });
+
+                const client = await connectionManager.connect(target.id, true);
+                if (client) {
+                    vscode.window.showInformationMessage(`Reconnected to "${target.name}"`);
+                    treeProvider.refresh();
+                } else {
+                    const newStatus = connectionManager.getConnectionStatus(target.id);
+                    if (newStatus === 'disconnected') {
+                        vscode.window.showInformationMessage(`Reconnection to "${target.name}" cancelled`);
+                    }
+                }
+            });
+        }),
+
+        // Allow cancelling a pending connection attempt via a dedicated command
+        vscode.commands.registerCommand('postgres-editor.cancelConnect', async (item?: DatabaseTreeItem) => {
+            // If invoked from the tree, ensure we have the target id
+            let targetId: string | undefined;
+            let name = 'connection';
+            if (item && item.connectionId) {
+                targetId = item.connectionId;
+                // DatabaseTreeItem's label is declared as string in our constructor,
+                // but the base TreeItem type is more permissive. Cast to string
+                // to keep TypeScript happy.
+                name = (item.label as string) || 'connection';
+            } else {
+                // If not invoked from a tree item, ask the user to pick a connecting target
+                const configs = await connectionManager.getConnections();
+                const connecting = configs.filter(c => connectionManager.getConnectionStatus(c.id) === 'connecting');
+                if (connecting.length === 0) {
+                    vscode.window.showInformationMessage('No connection attempts in progress');
+                    return;
+                }
+
+                type ConnectAttemptPick = vscode.QuickPickItem & { id: string };
+                const picks: ConnectAttemptPick[] = connecting.map(c => ({ label: c.name, id: c.id }));
+                const choice = await vscode.window.showQuickPick<ConnectAttemptPick>(picks, { placeHolder: 'Select connection to cancel' });
+                if (!choice) return;
+                targetId = choice.id;
+                name = choice.label || 'connection';
             }
+
+            if (!targetId) return;
+
+            const cancelled = await connectionManager.cancelConnect(targetId);
+            if (cancelled) {
+                vscode.window.showInformationMessage(`Cancelled connection attempt to "${name}"`);
+                treeProvider.refresh();
+            } else {
+                vscode.window.showInformationMessage(`No active connection attempt to cancel for "${name}"`);
+            }
+        }),
+        // Cancel all in-flight connection attempts
+        vscode.commands.registerCommand('postgres-editor.cancelAllConnects', async () => {
+            const configs = await connectionManager.getConnections();
+            const connecting = configs.filter(c => connectionManager.getConnectionStatus(c.id) === 'connecting');
+            if (connecting.length === 0) {
+                vscode.window.showInformationMessage('No connection attempts in progress');
+                return;
+            }
+
+            for (const c of connecting) {
+                await connectionManager.cancelConnect(c.id);
+            }
+
+            vscode.window.showInformationMessage(`Cancelled ${connecting.length} connection attempt(s)`);
+            treeProvider.refresh();
         }),
 
         vscode.commands.registerCommand('postgres-editor.openTable', async (item) => {

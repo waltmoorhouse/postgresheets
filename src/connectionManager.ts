@@ -27,6 +27,8 @@ export class ConnectionManager {
     private connectionStatuses: Map<string, ConnectionStatus> = new Map();
     private activityCounters: Map<string, number> = new Map();
     private pendingConnections: Map<string, Promise<Client | null>> = new Map();
+    // Controllers to allow cancelling pending connection attempts
+    private pendingControllers: Map<string, AbortController> = new Map();
     private statusEmitter = new vscode.EventEmitter<{ id: string; status: ConnectionStatus }>();
 
     readonly onStatusChange = this.statusEmitter.event;
@@ -236,9 +238,14 @@ export class ConnectionManager {
 
         this.setStatus(id, 'connecting');
 
+        // Create an AbortController so callers can cancel this connection attempt
+        const controller = new AbortController();
+        this.pendingControllers.set(id, controller);
+
         const connectPromise = (async () => {
+            let client: Client | undefined;
             try {
-                const client = new Client({
+                client = new Client({
                     host: config.host,
                     port: config.port,
                     database: config.database,
@@ -247,15 +254,64 @@ export class ConnectionManager {
                     ssl: config.ssl ? { rejectUnauthorized: false } : undefined
                 });
 
-                await client.connect();
-                this.attachClientListeners(id, client);
-                this.connections.set(id, client);
+                // Promise that resolves to null if the user aborts the connection attempt.
+                const abortPromise = new Promise<Client | null>((resolve) => {
+                    controller.signal.addEventListener('abort', async () => {
+                        try {
+                            // Attempt to forcibly destroy the underlying socket/stream
+                            // if the client has started a connection but hasn't
+                            // completed. This increases the chance of cancelling a
+                            // connect attempt that would otherwise block until OS
+                            // TCP timeouts expire.
+                            try {
+                                const connAny = client as any;
+                                if (connAny && connAny.connection && connAny.connection.stream) {
+                                    try { connAny.connection.stream.destroy(); } catch {}
+                                }
+                            } catch {}
+
+                            // Also attempt a graceful end if the client is already
+                            // connected.
+                            if (client) {
+                                try { await client.end(); } catch {}
+                            }
+                        } catch (e) {
+                            // swallow
+                        }
+                        // Resolve with null to indicate the connect was cancelled.
+                        resolve(null);
+                    }, { once: true });
+                });
+
+                // Race the real connect against the abort signal.
+                const connectOp = client.connect().then(() => client);
+                const result = await Promise.race([connectOp, abortPromise]);
+
+                if (result === null) {
+                    // User cancelled; return null without showing an error.
+                    this.setStatus(id, 'disconnected');
+                    return null;
+                }
+
+                // Successfully connected
+                const connectedClient = result as Client;
+                this.attachClientListeners(id, connectedClient);
+                this.connections.set(id, connectedClient);
                 this.setStatus(id, 'connected');
-                return client;
+                return connectedClient;
             } catch (error) {
+                // If this connection was aborted, the controller will already have
+                // set the status to 'disconnected' — treat that case as non-error.
+                if (controller.signal.aborted) {
+                    return null;
+                }
+
                 this.setStatus(id, 'error');
                 vscode.window.showErrorMessage(`Failed to connect: ${error}`);
                 return null;
+            } finally {
+                // Ensure controller is cleared when the attempt finishes
+                this.pendingControllers.delete(id);
             }
         })();
 
@@ -269,12 +325,24 @@ export class ConnectionManager {
     }
 
     async disconnect(id: string): Promise<void> {
-        const pending = this.pendingConnections.get(id);
-        if (pending) {
+        // If a connection attempt is in-flight, abort it so the user doesn't
+        // have to wait for a long network timeout.
+        const controller = this.pendingControllers.get(id);
+        if (controller) {
             try {
-                await pending;
+                controller.abort();
             } catch {
-                // ignore errors here; pending connect already surfaced
+                // ignore
+            }
+
+            const pending = this.pendingConnections.get(id);
+            if (pending) {
+                try {
+                    // Wait for the pending promise to settle so resources are cleaned up.
+                    await pending;
+                } catch {
+                    // ignore
+                }
             }
         }
 
@@ -294,6 +362,38 @@ export class ConnectionManager {
     async refreshConnection(id: string): Promise<Client | null> {
         await this.disconnect(id);
         return this.connect(id, false);
+    }
+
+    /**
+     * Cancels an in-flight connection attempt if present.
+     * Returns true if a pending attempt was found and cancelled, false otherwise.
+     */
+    async cancelConnect(id: string): Promise<boolean> {
+        const controller = this.pendingControllers.get(id);
+        if (!controller) {
+            return false;
+        }
+
+        try {
+            controller.abort();
+        } catch (e) {
+            // ignore errors during abort
+        }
+
+        const pending = this.pendingConnections.get(id);
+        if (pending) {
+            try {
+                await pending;
+            } catch {
+                // ignore
+            }
+        }
+
+        // Ensure internal maps are cleared and status reflects that we're not connecting
+        this.pendingControllers.delete(id);
+        this.pendingConnections.delete(id);
+        this.setStatus(id, 'disconnected');
+        return true;
     }
 
     getConnectionStatus(id: string): ConnectionStatus {

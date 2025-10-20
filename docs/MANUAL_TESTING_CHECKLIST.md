@@ -124,6 +124,8 @@ _____________________________________________
 ☐ Status changes to "connecting" then "connected"  
 ☐ No error messages  
 ☐ Databases expand correctly  
+☐ While connecting, click the notification "Cancel" button to abort the attempt  
+☐ While connecting, right-click the connection and select "Cancel Connect" to abort the attempt  
 
 ### Connection Errors
 ☐ Wrong password shows error message  

@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "1.0.100",
+  "version": "2.0.1",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -70,9 +70,21 @@
         "category": "PostgreSQL"
       },
       {
+        "command": "postgres-editor.cancelConnect",
+        "title": "Cancel Connect",
+        "icon": "$(debug-stop)",
+        "category": "PostgreSQL"
+      },
+      {
         "command": "postgres-editor.createTable",
         "title": "Create Table",
         "icon": "$(diff-added)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.cancelAllConnects",
+        "title": "Cancel All Connects",
+        "icon": "$(debug-stop)",
         "category": "PostgreSQL"
       },
       {
@@ -118,6 +130,12 @@
           "when": "view == postgresExplorer",
           "group": "navigation"
         }
+        ,
+        {
+          "command": "postgres-editor.cancelAllConnects",
+          "when": "view == postgresExplorer && postgresHasConnecting",
+          "group": "navigation"
+        }
       ],
       "view/item/context": [
         {
@@ -128,6 +146,11 @@
         {
           "command": "postgres-editor.disconnect",
           "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy || viewItem == connection.connecting)",
+          "group": "inline@1"
+        },
+        {
+          "command": "postgres-editor.cancelConnect",
+          "when": "view == postgresExplorer && viewItem == connection.connecting",
           "group": "inline@1"
         },
         {
@@ -195,6 +218,7 @@
     "@types/pg": "^8.15.5",
     "@types/vscode": "^1.80.0",
     "jest": "^30.2.0",
+    "svelte-preprocess": "^6.0.3",
     "ts-jest": "^29.4.4",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
