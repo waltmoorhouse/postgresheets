@@ -27,4 +27,7 @@ export class ThemeIcon {}
 
 export const ProgressLocation = { Notification: 15 };
 
+// Minimal ViewColumn enum for webview panel creation
+export const ViewColumn = { One: 1 };
+
 export type ExtensionContext = any;

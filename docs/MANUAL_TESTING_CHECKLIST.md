@@ -220,6 +220,7 @@ _____________________________________________
 ☐ Data types display appropriately  
 ☐ NULL values shown as "NULL"  
 ☐ Empty strings shown as empty  
+☐ Status indicators include a shape/glyph and textual label (not color-only)
 
 ### Data Types
 ☐ Text/VARCHAR displays correctly  
@@ -367,7 +368,7 @@ _____________________________________________
 ☐ Can enter NULL (how?)  
 ☐ Can enter empty string  
 ☐ Can edit JSON (modal or inline)  
-☐ Can edit arrays  
+☐ Can edit arrays (via JSON editor modal)  
 
 ### Delete Row
 ☐ Select row (checkbox)  

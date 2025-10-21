@@ -9,6 +9,8 @@ interface ColumnInfo {
     name: string;
     type: string;
     nullable: boolean;
+    // For enum-typed columns this contains the list of valid labels
+    enumValues?: string[];
 }
 
 interface PrimaryKeyInfo {
@@ -29,6 +31,12 @@ interface PanelState {
     searchTerm: string;
 }
 
+interface TablePreferences {
+    columnOrder?: string[];
+    hiddenColumns?: string[];
+    columnWidths?: Record<string, number>;
+}
+
 interface TableStatePayload {
     schemaName: string;
     tableName: string;
@@ -42,6 +50,7 @@ interface TableStatePayload {
     sort: SortDescriptor | null;
     filters: FilterMap;
     searchTerm: string;
+    tablePreferences?: TablePreferences;
 }
 
 interface GridChangeInsert {
@@ -195,19 +204,117 @@ export class DataEditor {
         this.connectionManager.markBusy(connectionId);
 
         try {
+            // Fetch typed column information including type OIDs so we can
+            // detect enums and array element types accurately.
             const columnsResult = await client.query(
-                `SELECT column_name, data_type, is_nullable
-                 FROM information_schema.columns
-                 WHERE table_schema = $1 AND table_name = $2
-                 ORDER BY ordinal_position`,
+                `SELECT a.attname AS column_name,
+                        pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+                        NOT a.attnotnull AS is_nullable,
+                        t.oid AS typoid,
+                        t.typname AS typname,
+                        t.typtype AS typtype,
+                        t.typelem AS typelem
+                 FROM pg_attribute a
+                 JOIN pg_class c ON a.attrelid = c.oid
+                 JOIN pg_namespace n ON c.relnamespace = n.oid
+                 JOIN pg_type t ON a.atttypid = t.oid
+                 WHERE n.nspname = $1
+                   AND c.relname = $2
+                   AND a.attnum > 0
+                   AND NOT a.attisdropped
+                 ORDER BY a.attnum;`,
                 [schemaName, tableName]
             );
 
-            const columns: ColumnInfo[] = columnsResult.rows.map(row => ({
-                name: row.column_name,
-                type: row.data_type,
-                nullable: row.is_nullable === 'YES'
-            }));
+            // Map basic column metadata and collect candidate type OIDs for
+            // additional inspection (enums & element types).
+            const columns: ColumnInfo[] = [];
+            const candidateTypeOids: number[] = [];
+            for (const r of columnsResult.rows) {
+                const typoid = Number(r.typoid) || 0;
+                const typelem = Number(r.typelem) || 0;
+                if (typoid) candidateTypeOids.push(typoid);
+                if (typelem) candidateTypeOids.push(typelem);
+                columns.push({
+                    name: r.column_name,
+                    type: r.data_type,
+                    nullable: Boolean(r.is_nullable)
+                });
+            }
+
+            // Deduplicate OIDs
+            const uniqueTypeOids = Array.from(new Set(candidateTypeOids));
+
+            // Fetch type metadata for the collected type OIDs so we can detect
+            // which are enum types and which are array element types.
+            const typeInfoMap: Record<number, { typname: string; typtype: string; typelem: number; oid: number }> = {};
+            if (uniqueTypeOids.length > 0) {
+                const typeRows = await client.query(
+                    `SELECT oid, typname, typtype, typelem FROM pg_type WHERE oid = ANY($1::oid[])`,
+                    [uniqueTypeOids]
+                );
+                for (const tr of typeRows.rows) {
+                    typeInfoMap[Number(tr.oid)] = {
+                        typname: tr.typname,
+                        typtype: tr.typtype,
+                        typelem: Number(tr.typelem) || 0,
+                        oid: Number(tr.oid)
+                    };
+                }
+            }
+
+            // Identify enum type OIDs to fetch their labels
+            const enumTypeOids: number[] = [];
+            for (const oidStr of Object.keys(typeInfoMap)) {
+                const oid = Number(oidStr);
+                const info = typeInfoMap[oid];
+                if (info && info.typtype === 'e') {
+                    enumTypeOids.push(oid);
+                }
+            }
+
+            // Also check array element types referenced by columns for enum element types
+            for (const colRow of columnsResult.rows) {
+                const elemOid = Number(colRow.typelem) || 0;
+                if (elemOid && typeInfoMap[elemOid] && typeInfoMap[elemOid].typtype === 'e') {
+                    if (!enumTypeOids.includes(elemOid)) {
+                        enumTypeOids.push(elemOid);
+                    }
+                }
+            }
+
+            // Fetch enum labels grouped by enum type oid
+            const enumLabelsByOid: Record<number, string[]> = {};
+            if (enumTypeOids.length > 0) {
+                const enumRows = await client.query(
+                    `SELECT enumtypid::oid AS enumtypid, enumlabel
+                     FROM pg_enum
+                     WHERE enumtypid = ANY($1::oid[])
+                     ORDER BY enumtypid, enumsortorder`,
+                    [enumTypeOids]
+                );
+                for (const er of enumRows.rows) {
+                    const typ = Number(er.enumtypid);
+                    enumLabelsByOid[typ] = enumLabelsByOid[typ] || [];
+                    enumLabelsByOid[typ].push(String(er.enumlabel));
+                }
+            }
+
+            // Attach enum labels to matching columns (either the column type
+            // itself is an enum or its element type is an enum).
+            for (let i = 0; i < columns.length; i++) {
+                const colRow = columnsResult.rows[i];
+                const col = columns[i];
+                const typoid = Number(colRow.typoid) || 0;
+                const typelem = Number(colRow.typelem) || 0;
+                if (typoid && enumLabelsByOid[typoid]) {
+                    col.enumValues = enumLabelsByOid[typoid];
+                } else if (typelem && enumLabelsByOid[typelem]) {
+                    // For array-of-enum attach the enum labels too so the
+                    // webview can offer better editing UX for element values.
+                    col.enumValues = enumLabelsByOid[typelem];
+                }
+            }
 
             const pkResult = await client.query(
                 `SELECT a.attname
@@ -246,10 +353,67 @@ export class DataEditor {
             const dataValues = [...values, this.paginationSize, offset];
             const dataResult = await client.query(dataQuery, dataValues);
 
+            // Normalize returned values for JSON, arrays and enums so the
+            // webview receives JS-native types (objects/arrays) rather than
+            // Postgres textual representations.
+            const normalizedRows: Record<string, unknown>[] = dataResult.rows.map((row: any) => {
+                const copy: Record<string, unknown> = { ...row };
+                for (const col of columns) {
+                    const raw = row[col.name];
+                    try {
+                        // JSON / JSONB: ensure JS objects rather than raw strings
+                        if (col.type === 'json' || col.type === 'jsonb') {
+                            if (typeof raw === 'string') {
+                                try {
+                                    copy[col.name] = JSON.parse(raw);
+                                } catch {
+                                    copy[col.name] = raw;
+                                }
+                            } else {
+                                copy[col.name] = raw;
+                            }
+                            continue;
+                        }
+
+                        // Array types: attempt to convert Postgres array literals
+                        // into JS arrays if driver returned them as strings.
+                        if (String(col.type).endsWith('[]')) {
+                            if (Array.isArray(raw)) {
+                                copy[col.name] = raw;
+                                continue;
+                            }
+                            if (typeof raw === 'string') {
+                                // Try JSON first (some drivers may return JSON-like arrays)
+                                try {
+                                    const parsed = JSON.parse(raw);
+                                    if (Array.isArray(parsed)) {
+                                        copy[col.name] = parsed;
+                                        continue;
+                                    }
+                                } catch {
+                                    // fall through to Postgres literal parser
+                                }
+                                copy[col.name] = this.parsePostgresArrayLiteral(raw, col.type);
+                                continue;
+                            }
+                        }
+
+                        // Enums are returned as strings already; leave as-is.
+                        copy[col.name] = raw;
+                    } catch (err) {
+                        // Best-effort: leave original raw value if any conversion fails
+                        copy[col.name] = raw;
+                    }
+                }
+                return copy;
+            });
+
             const countQuery = `SELECT COUNT(*)::int AS total FROM ${qualifiedTable}${whereClause ? ` ${whereClause}` : ''}`;
             const countResult = await client.query(countQuery, values);
 
             const totalRows: number = countResult.rows[0]?.total ?? dataResult.rowCount ?? 0;
+
+            const prefs = await this.loadTablePreferences(schemaName, tableName);
 
             return {
                 schemaName,
@@ -263,7 +427,8 @@ export class DataEditor {
                 batchMode: this.batchMode,
                 sort: state.sort,
                 filters: state.filters,
-                searchTerm: state.searchTerm
+                searchTerm: state.searchTerm,
+                tablePreferences: prefs
             };
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load table data: ${error}`);
@@ -354,6 +519,15 @@ export class DataEditor {
             case 'refresh': {
                 const state = this.getPanelState(panel);
                 await this.loadTableData(panel, connectionId, schemaName, tableName, state.page);
+                break;
+            }
+            case 'saveTablePreferences': {
+                const prefs = (payload as { prefs?: any })?.prefs ?? {};
+                await this.saveTablePreferences(panel, schemaName, tableName, prefs);
+                break;
+            }
+            case 'resetTablePreferences': {
+                await this.resetTablePreferences(panel, schemaName, tableName);
                 break;
             }
             default:
@@ -519,4 +693,121 @@ export class DataEditor {
         const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
         return Array.from({ length: 32 }, () => possible.charAt(Math.floor(Math.random() * possible.length))).join('');
     }
+
+    /**
+     * Basic Postgres array literal parser. Converts strings like
+     * '{a,b,"c,d",NULL}' into JS arrays. This is intentionally
+     * lightweight and aimed at common use-cases (text/number arrays).
+     */
+    private parsePostgresArrayLiteral(literal: string, pgType?: string): unknown[] {
+        if (!literal || typeof literal !== 'string') {
+            return [];
+        }
+        // Trim surrounding braces when present
+        let body = literal;
+        if (body.startsWith('{') && body.endsWith('}')) {
+            body = body.slice(1, -1);
+        }
+
+        const result: unknown[] = [];
+        let current = '';
+        let inQuotes = false;
+        let i = 0;
+        while (i < body.length) {
+            const ch = body[i];
+            if (inQuotes) {
+                if (ch === '"') {
+                    // Support escaped quotes by looking ahead
+                    if (i + 1 < body.length && body[i + 1] === '"') {
+                        current += '"';
+                        i += 2;
+                        continue;
+                    }
+                    inQuotes = false;
+                    i++;
+                    continue;
+                }
+                // Backslash escapes
+                if (ch === '\\' && i + 1 < body.length) {
+                    current += body[i + 1];
+                    i += 2;
+                    continue;
+                }
+                current += ch;
+                i++;
+                continue;
+            }
+
+            if (ch === '"') {
+                inQuotes = true;
+                i++;
+                continue;
+            }
+
+            if (ch === ',') {
+                result.push(this.castArrayElement(current, pgType));
+                current = '';
+                i++;
+                continue;
+            }
+
+            current += ch;
+            i++;
+        }
+
+        if (current.length > 0 || body.endsWith(',')) {
+            result.push(this.castArrayElement(current, pgType));
+        }
+
+        return result;
+    }
+
+    private castArrayElement(raw: string, pgType?: string): unknown {
+        const trimmed = raw === null || raw === undefined ? '' : String(raw).trim();
+        if (trimmed === 'NULL') {
+            return null;
+        }
+        // Attempt numeric casts for common numeric array element types
+        if (pgType && (pgType.includes('int') || pgType === 'bigint' || pgType === 'smallint')) {
+            const n = Number.parseInt(trimmed, 10);
+            return Number.isNaN(n) ? trimmed : n;
+        }
+        if (pgType && (pgType === 'numeric' || pgType === 'decimal' || pgType.includes('float') || pgType === 'real' || pgType === 'double precision')) {
+            const f = Number.parseFloat(trimmed);
+            return Number.isNaN(f) ? trimmed : f;
+        }
+        // Booleans
+        if (pgType && (pgType === 'boolean' || pgType === 'bool')) {
+            return trimmed.toLowerCase() === 'true' || trimmed === '1';
+        }
+        return trimmed;
+    }
+
+    // New message handlers for table preferences
+    private async saveTablePreferences(panel: vscode.WebviewPanel, schemaName: string, tableName: string, prefs: any) {
+        // Persist preferences into globalState keyed by table identifier
+        const key = `tablePrefs:${schemaName}.${tableName}`;
+        try {
+            await this.context.globalState.update(key, prefs);
+            panel.webview.postMessage({ command: 'saveTablePreferencesResult', payload: { success: true } });
+        } catch (err) {
+            panel.webview.postMessage({ command: 'saveTablePreferencesResult', payload: { success: false, error: String(err) } });
+        }
+    }
+
+    private async loadTablePreferences(schemaName: string, tableName: string) {
+        const key = `tablePrefs:${schemaName}.${tableName}`;
+        return this.context.globalState.get<any>(key, {});
+}
+
+    private async resetTablePreferences(panel: vscode.WebviewPanel, schemaName: string, tableName: string) {
+        const key = `tablePrefs:${schemaName}.${tableName}`;
+        try {
+            await this.context.globalState.update(key, undefined);
+            panel.webview.postMessage({ command: 'resetTablePreferencesResult', payload: { success: true } });
+        } catch (err) {
+            panel.webview.postMessage({ command: 'resetTablePreferencesResult', payload: { success: false, error: String(err) } });
+        }
+    }
+
 }

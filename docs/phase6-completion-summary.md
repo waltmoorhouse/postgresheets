@@ -111,8 +111,8 @@
 
 **Known Issues Identified:**
 1. SqlGenerator doesn't properly escape double quotes in identifiers (documented, medium priority)
-2. Array types display as JSON strings (accepted limitation)
-3. Custom enum types lack autocomplete (accepted limitation)
+2. Array types were displayed as JSON strings — now normalized to JS arrays and editable via the JSON editor (resolved)
+3. Custom enum types lacked autocomplete — now detected and rendered with select controls in the grid (resolved)
 4. Pagination performance with large offsets (PostgreSQL limitation)
 
 ---

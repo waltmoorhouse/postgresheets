@@ -3,6 +3,7 @@
  * Tests database connection lifecycle
  */
 
+// @ts-nocheck
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 

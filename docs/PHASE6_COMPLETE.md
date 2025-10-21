@@ -121,8 +121,8 @@ SqlGenerator doesn't escape double quotes within identifiers.
 - **Fix Planned**: Phase 7
 
 ### Issue #2-5: Accepted Limitations
-- Array types display as JSON strings
-- Custom enum types lack autocomplete
+ - Array types were displayed as JSON strings (now normalized to JS arrays and editable via JSON editor)
+- Custom enum types lacked autocomplete — now detected and exposed to the webview so the UI can render select controls for enum columns
 - Pagination performance with large offsets
 - No cross-database queries
 

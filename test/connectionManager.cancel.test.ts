@@ -1,4 +1,5 @@
 // Use the manual mock in test/__mocks__/vscode.ts
+import { jest } from '@jest/globals';
 jest.mock('vscode');
 
 import { ConnectionManager } from '../src/connectionManager';
@@ -73,7 +74,7 @@ describe('ConnectionManager cancelConnect', () => {
 
         const config = { id: 'del1', name: 'to-delete', host: 'localhost', port: 5432, database: 'db', username: 'user' };
         (ctx.globalState.get as jest.Mock).mockReturnValue([config]);
-        (ctx.secrets.get as jest.Mock).mockResolvedValue('pass');
+    ((ctx.secrets.get) as any).mockResolvedValue('pass');
 
         // Spy on update/delete calls
         const updateSpy = jest.spyOn(ctx.globalState, 'update' as any);
@@ -102,7 +103,7 @@ describe('ConnectionManager cancelConnect', () => {
 
         const config = { id: 'del2', name: 'to-delete-conn', host: 'localhost', port: 5432, database: 'db', username: 'user' };
         (ctx.globalState.get as jest.Mock).mockReturnValue([config]);
-        (ctx.secrets.get as jest.Mock).mockResolvedValue('pass');
+    ((ctx.secrets.get) as any).mockResolvedValue('pass');
 
         const updateSpy = jest.spyOn(ctx.globalState, 'update' as any);
         const secretDeleteSpy = jest.spyOn(ctx.secrets, 'delete' as any);
@@ -128,7 +129,7 @@ describe('ConnectionManager cancelConnect', () => {
 
         const config = { id: 'del3', name: 'no-delete', host: 'localhost', port: 5432, database: 'db', username: 'user' };
         (ctx.globalState.get as jest.Mock).mockReturnValue([config]);
-        (ctx.secrets.get as jest.Mock).mockResolvedValue('pass');
+    ((ctx.secrets.get) as any).mockResolvedValue('pass');
 
         const updateSpy = jest.spyOn(ctx.globalState, 'update' as any);
         const secretDeleteSpy = jest.spyOn(ctx.secrets, 'delete' as any);

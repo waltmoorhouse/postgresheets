@@ -8,6 +8,8 @@ export interface ColumnInfo {
   name: string;
   type: string;
   nullable: boolean;
+  // When populated, lists valid enum labels for enum-typed columns
+  enumValues?: string[];
 }
 
 export interface PrimaryKeyInfo {
@@ -28,6 +30,11 @@ export interface TableStatePayload {
   sort?: SortDescriptor | null;
   filters?: Record<string, string>;
   searchTerm?: string;
+  // Optional preferences persisted by the extension (per table)
+  tablePreferences?: {
+    columnOrder?: string[];
+    hiddenColumns?: string[];
+  };
 }
 
 export interface SortDescriptor {

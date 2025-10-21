@@ -5,9 +5,10 @@ import { DataEditor } from './dataEditor';
 import { SchemaDesigner } from './schemaDesigner';
 import { CreateTableWizard } from './createTableWizard';
 import { DropTableWizard } from './dropTableWizard';
+import { info } from './logger';
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('PostgreSQL Data Editor extension is now active');
+    info('PostgreSQL Data Editor extension is now active');
 
     const connectionManager = new ConnectionManager(context);
     // Track connection attempts so we can expose a toolbar action when any
@@ -38,6 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
     const schemaDesigner = new SchemaDesigner(context, connectionManager);
     const createTableWizard = new CreateTableWizard(context, connectionManager, () => treeProvider.refresh());
     const dropTableWizard = new DropTableWizard(context, connectionManager, () => treeProvider.refresh());
+    const addConnectionWizard = new (require('./addConnectionWizard').AddConnectionWizard)(context, connectionManager, () => treeProvider.refresh());
 
     // Register tree view
     const treeView = vscode.window.createTreeView('postgresExplorer', {
@@ -91,8 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('postgres-editor.addConnection', async () => {
-            await connectionManager.addConnection();
-            treeProvider.refresh();
+            await addConnectionWizard.openWizard();
         }),
 
         vscode.commands.registerCommand('postgres-editor.editConnection', async (item) => {
@@ -239,6 +240,17 @@ export function activate(context: vscode.ExtensionContext) {
 
             vscode.window.showInformationMessage(`Cancelled ${connecting.length} connection attempt(s)`);
             treeProvider.refresh();
+        }),
+
+        // Test-only command to open Add Connection with a custom panelFactory
+        vscode.commands.registerCommand('postgres-editor._testOpenAddConnection', async (panelFactory?: any) => {
+            const testWizard = new (require('./addConnectionWizard').AddConnectionWizard)(context, connectionManager, () => treeProvider.refresh(), panelFactory);
+            await testWizard.openWizard();
+        }),
+
+        // Test-only: return saved connections (for integration tests only)
+        vscode.commands.registerCommand('postgres-editor._testListConnections', async () => {
+            return await connectionManager.getConnections();
         }),
 
         vscode.commands.registerCommand('postgres-editor.openTable', async (item) => {

@@ -124,9 +124,12 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
             );
 
             item.iconPath = this.getStatusIcon(status);
+            // Description uses a shape glyph plus a short textual status so
+            // colorblind users have a shape to rely on in addition to color.
             item.description = this.formatStatusLabel(status);
             item.contextValue = this.getConnectionContextValue(status);
-            item.tooltip = `${config.host}:${config.port}/${config.database}\nStatus: ${this.formatStatusLabel(status)}`;
+            // Tooltip contains a plain text status for screen readers and clarity.
+            item.tooltip = `${config.host}:${config.port}/${config.database}\nStatus: ${this.formatStatusText(status)}`;
 
             return item;
         });
@@ -240,25 +243,41 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
                 return new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.red'));
             case 'disconnected':
             default:
-                return new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.red'));
+                return new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.gray'));
         }
     }
 
     private formatStatusLabel(status: ConnectionStatus): string {
-        // Use compact colored dot indicators for the tree description while keeping
-        // the full textual status in tooltips for accessibility and clarity.
+        // Provide a glyph plus a short status so users do not rely on
+        // color alone (e.g. green circle). Shapes give an additional
+        // visual cue for colorblind users.
         switch (status) {
             case 'connected':
-                return '🟢';
+                return '✔ Connected';
             case 'busy':
-                return '🔵';
+                return '⚙ Busy';
             case 'connecting':
-                return '🟡';
+                return '⏳ Connecting';
             case 'error':
-                return '<blink>🔴</blink>';
+                return '🔴 Error';
             case 'disconnected':
             default:
-                return '🔴';
+                return '✖ Disconnected';
+        }
+    }
+    private formatStatusText(status: ConnectionStatus): string {
+        switch (status) {
+            case 'connected':
+                return 'Connected';
+            case 'busy':
+                return 'Busy';
+            case 'connecting':
+                return 'Connecting';
+            case 'error':
+                return 'Error';
+            case 'disconnected':
+            default:
+                return 'Disconnected';
         }
     }
 

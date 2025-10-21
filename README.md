@@ -22,7 +22,7 @@ However, when using code created with GenAI (or really when installing any VSCod
 
 ### Prerequisites
 
-- Node.js 18+ and npm
+- Node.js 20+ and npm
 - VSCode 1.80.0 or higher
 
 ### Setup Steps
@@ -177,7 +177,7 @@ To publish to the VSCode Marketplace:
 - Requires tables to have primary keys for updates/deletes
 - No support for altering table structure (columns, indexes, etc.)
 - No support for stored procedures or functions
-- Complex data types (arrays, custom types) shown as strings
+- Complex data types (arrays, custom types) shown as strings (arrays and enums have improved handling; enums show a select UI, arrays are normalized and editable via the JSON editor)
 
 ## Contributing
 

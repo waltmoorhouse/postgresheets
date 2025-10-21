@@ -2,33 +2,50 @@
 
 ## Current Known Issues
 
+### Colored Circles Not Good For Colorblind Users
+**Issue:** Connection status in the tree used small colored circle indicators (🟢/🔴) which relied on color alone to convey state and were difficult for colorblind users to distinguish.
+
+**Fix:** The tree view now uses a shape glyph plus short textual label for connection statuses (e.g. "✔ Connected", "✖ Disconnected", "⏳ Connecting"). The icon itself was kept as the standard database glyph and the status glyph/text is included in the item's description so it remains visible regardless of theme or color perception.
+
+**Impact:**
+- Colorblind users see a clear glyph (check/X/gear/hourglass) and short text which does not rely solely on color.
+- Tooltips include an explicit plain-text status label for screen readers and clarity.
+
+**Priority:** Low → Low (Accessibility improvement)
+
+**Status:** Fixed
+
 ### Limited Array Type Support
+**Issue (Resolved):** PostgreSQL array types (e.g., `TEXT[]`, `INTEGER[]`) used to be displayed as raw JSON/text in the grid which made editing awkward and indistinguishable from other string values.
 
-**Issue:** PostgreSQL array types (e.g., `TEXT[]`, `INTEGER[]`) are displayed as JSON strings in the data grid.
+**Fix:** The data editor now normalizes PostgreSQL array values into native JavaScript arrays before sending payloads to the webview. Arrays are presented in the grid using a compact JSON-like preview and can be edited in the modal JSON editor (open the cell's JSON editor to view/modify array contents). The extension also attempts to parse common driver-returned representations (JSON-like strings and PostgreSQL array literals).
 
-**Impact:** 
-- Arrays cannot be edited directly in grid
-- Visual distinction between arrays and other JSON types is unclear
+**Impact (now):**
+- Arrays are shown as JSON arrays (e.g. ["a","b"]) in the grid preview.
+- Arrays can be edited via the JSON editor modal; changes are converted back into native arrays before execution.
+- Parsing is best-effort for textual representations; very exotic array encodings may still require manual SQL.
 
-**Workaround:** Use manual SQL to update array columns.
+**Workaround (deprecated):** Manual SQL is no longer required for many common array edits, but remains an option for complex/edge-case array manipulations.
 
-**Priority:** Low
+**Priority:** Medium
 
-**Status:** Accepted limitation for current version
+**Status:** Fixed (see notes/caveats)
 
 ### Custom Enum Type Display
+**Issue (Resolved):** Custom ENUM types were displayed as plain strings with no indication of the valid labels.
 
-**Issue:** Custom ENUM types show as their string values without indication of valid options.
+**Fix:** The extension now detects enum-typed columns and retrieves their allowed labels from PostgreSQL (`pg_type` / `pg_enum`). Enum metadata is sent to the webview and the data grid renders a native select control for enum columns, preventing invalid inputs and improving discoverability.
 
-**Impact:** 
-- Users may enter invalid enum values
-- No autocomplete for valid enum values
+**Impact (now):**
+- Enum columns display a dropdown with valid labels when edited inline.
+- For array-of-enum columns the editor provides the enum's labels in the modal editor to make element editing easier.
+- Server-side enforcement still applies; invalid enum values will be rejected by PostgreSQL at execution time.
 
-**Workaround:** Refer to database schema for valid enum values.
+**Workaround (deprecated):** Manual lookup is no longer necessary to discover valid values for standard enum types.
 
-**Priority:** Low
+**Priority:** Low → Medium
 
-**Status:** Accepted limitation - may add in future version
+**Status:** Fixed
 
 ### Pagination Performance with Large Offsets
 
