@@ -6,6 +6,6 @@
   export let ariaLabel: string | undefined;
 </script>
 
-<div aria-label={ariaLabel}>
+<div aria-label={ariaLabel} tabindex="-1">
   <slot />
 </div>

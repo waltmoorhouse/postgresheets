@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from './connectionManager';
 import { DatabaseTreeItem } from './databaseTreeProvider';
 import { SqlGenerator } from './sqlGenerator';
+import { parsePostgresArrayLiteral, applyEnumLabelsToColumns } from './pgUtils';
 
 interface ColumnInfo {
     name: string;
@@ -301,20 +302,9 @@ export class DataEditor {
             }
 
             // Attach enum labels to matching columns (either the column type
-            // itself is an enum or its element type is an enum).
-            for (let i = 0; i < columns.length; i++) {
-                const colRow = columnsResult.rows[i];
-                const col = columns[i];
-                const typoid = Number(colRow.typoid) || 0;
-                const typelem = Number(colRow.typelem) || 0;
-                if (typoid && enumLabelsByOid[typoid]) {
-                    col.enumValues = enumLabelsByOid[typoid];
-                } else if (typelem && enumLabelsByOid[typelem]) {
-                    // For array-of-enum attach the enum labels too so the
-                    // webview can offer better editing UX for element values.
-                    col.enumValues = enumLabelsByOid[typelem];
-                }
-            }
+            // itself is an enum or its element type is an enum). Use the
+            // shared helper so behavior is testable in isolation.
+            applyEnumLabelsToColumns(columns, columnsResult.rows, enumLabelsByOid);
 
             const pkResult = await client.query(
                 `SELECT a.attname
@@ -383,7 +373,6 @@ export class DataEditor {
                                 continue;
                             }
                             if (typeof raw === 'string') {
-                                // Try JSON first (some drivers may return JSON-like arrays)
                                 try {
                                     const parsed = JSON.parse(raw);
                                     if (Array.isArray(parsed)) {
@@ -393,7 +382,8 @@ export class DataEditor {
                                 } catch {
                                     // fall through to Postgres literal parser
                                 }
-                                copy[col.name] = this.parsePostgresArrayLiteral(raw, col.type);
+                                // Use centralized parser
+                                copy[col.name] = parsePostgresArrayLiteral(raw, col.type);
                                 continue;
                             }
                         }
@@ -699,89 +689,7 @@ export class DataEditor {
      * '{a,b,"c,d",NULL}' into JS arrays. This is intentionally
      * lightweight and aimed at common use-cases (text/number arrays).
      */
-    private parsePostgresArrayLiteral(literal: string, pgType?: string): unknown[] {
-        if (!literal || typeof literal !== 'string') {
-            return [];
-        }
-        // Trim surrounding braces when present
-        let body = literal;
-        if (body.startsWith('{') && body.endsWith('}')) {
-            body = body.slice(1, -1);
-        }
-
-        const result: unknown[] = [];
-        let current = '';
-        let inQuotes = false;
-        let i = 0;
-        while (i < body.length) {
-            const ch = body[i];
-            if (inQuotes) {
-                if (ch === '"') {
-                    // Support escaped quotes by looking ahead
-                    if (i + 1 < body.length && body[i + 1] === '"') {
-                        current += '"';
-                        i += 2;
-                        continue;
-                    }
-                    inQuotes = false;
-                    i++;
-                    continue;
-                }
-                // Backslash escapes
-                if (ch === '\\' && i + 1 < body.length) {
-                    current += body[i + 1];
-                    i += 2;
-                    continue;
-                }
-                current += ch;
-                i++;
-                continue;
-            }
-
-            if (ch === '"') {
-                inQuotes = true;
-                i++;
-                continue;
-            }
-
-            if (ch === ',') {
-                result.push(this.castArrayElement(current, pgType));
-                current = '';
-                i++;
-                continue;
-            }
-
-            current += ch;
-            i++;
-        }
-
-        if (current.length > 0 || body.endsWith(',')) {
-            result.push(this.castArrayElement(current, pgType));
-        }
-
-        return result;
-    }
-
-    private castArrayElement(raw: string, pgType?: string): unknown {
-        const trimmed = raw === null || raw === undefined ? '' : String(raw).trim();
-        if (trimmed === 'NULL') {
-            return null;
-        }
-        // Attempt numeric casts for common numeric array element types
-        if (pgType && (pgType.includes('int') || pgType === 'bigint' || pgType === 'smallint')) {
-            const n = Number.parseInt(trimmed, 10);
-            return Number.isNaN(n) ? trimmed : n;
-        }
-        if (pgType && (pgType === 'numeric' || pgType === 'decimal' || pgType.includes('float') || pgType === 'real' || pgType === 'double precision')) {
-            const f = Number.parseFloat(trimmed);
-            return Number.isNaN(f) ? trimmed : f;
-        }
-        // Booleans
-        if (pgType && (pgType === 'boolean' || pgType === 'bool')) {
-            return trimmed.toLowerCase() === 'true' || trimmed === '1';
-        }
-        return trimmed;
-    }
+    // parsePostgresArrayLiteral and castArrayElement moved to src/pgUtils.ts
 
     // New message handlers for table preferences
     private async saveTablePreferences(panel: vscode.WebviewPanel, schemaName: string, tableName: string, prefs: any) {

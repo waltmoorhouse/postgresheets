@@ -49,19 +49,28 @@
   }
 
   let showHelp = false;
+  let shortcutsHeading: HTMLElement | null = null;
+
+  function toggleHelp() {
+    showHelp = !showHelp;
+    if (showHelp) {
+      // Move focus to the shortcuts heading for screen reader users
+      setTimeout(() => shortcutsHeading?.focus(), 0);
+    }
+  }
 </script>
 
 <div class="modal-backdrop">
   <FocusTrap ariaLabel="Hidden columns focus trap">
-  <div class="modal dialog hidden-columns" role="dialog" aria-modal="true" aria-label="Hidden columns" on:keydown={handleKeydown} tabindex="-1">
+  <div class="modal dialog hidden-columns" role="dialog" aria-modal="true" aria-label="Hidden columns" tabindex="-1" on:keydown={handleKeydown}>
     <div class="modal-header">
       <h3>Hidden columns</h3>
-      <button type="button" class="help-btn ps-btn ps-btn--icon" aria-expanded={showHelp} aria-controls="shortcuts" aria-label="Keyboard shortcuts" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (Alt+H)">?
+  <button type="button" class="help-btn ps-btn ps-btn--icon" aria-expanded={showHelp} aria-controls="shortcuts" aria-label="Keyboard shortcuts" on:click={toggleHelp} title="Keyboard shortcuts (Alt+H)">?
       </button>
     </div>
     <p>These columns are currently hidden. You can restore them individually or show all.</p>
-  <section id="shortcuts" class="shortcut-help" role="region" hidden={!showHelp} aria-hidden={!showHelp} tabindex={showHelp ? 0 : -1}>
-      <h4>Keyboard shortcuts</h4>
+  <section id="shortcuts" class="shortcut-help" hidden={!showHelp} aria-hidden={!showHelp} aria-labelledby="shortcuts-heading">
+    <h4 id="shortcuts-heading" bind:this={shortcutsHeading} tabindex="-1">Keyboard shortcuts</h4>
       <ul>
         <li><strong>Alt + R</strong>: Show all hidden columns</li>
         <li><strong>Alt + H</strong>: Toggle this help</li>

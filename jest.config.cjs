@@ -2,9 +2,10 @@ const path = require('path');
 
 module.exports = {
   transform: {
-  '^.+\\.svelte$': ['svelte-jester', { preprocess: path.resolve(__dirname, 'svelte.config.cjs'), compilerOptions: { css: 'injected' } }],
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json', useESM: true }],
-    '^.+\\.jsx?$': 'babel-jest'
+  '^.+\.svelte$': ['svelte-jester', { preprocess: path.resolve(__dirname, 'svelte.config.cjs'), compilerOptions: { css: 'injected' } }],
+    '^.+\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json', useESM: true }],
+    '^.+\.jsx?$': 'babel-jest',
+    '^.+\.mjs$': 'babel-jest'
   },
   testEnvironment: 'jest-environment-jsdom',
   setupFilesAfterEnv: ['<rootDir>/test/jest.setup.js'],
@@ -20,7 +21,13 @@ module.exports = {
     // Provide both ESM and CJS manual mocks; the ESM build will import the .mjs file while
     // older CJS resolution will use the .cjs mock. Jest will pick the appropriate file
     // based on how the test environment resolves modules in ESM mode.
-  '^vscode$': '<rootDir>/test/__mocks__/vscode.mjs',
+  // Use a thin CJS wrapper so Jest always gets a synchronous CommonJS
+  // export regardless of whether tests run under ESM or CJS.
+  // Map 'vscode' to the TypeScript mock so ESM-mode tests receive proper
+  // named exports (EventEmitter, ViewColumn, window, etc.). ts-jest will
+  // transform the .ts mock into the correct shape for tests running with
+  // useESM: true.
+  '^vscode$': '<rootDir>/test/__mocks__/vscode.ts',
   '^\\$lib/(.*)$': '<rootDir>/webview/src/lib/$1',
   '^svelte/internal/flags/legacy$': '<rootDir>/test/__mocks__/svelte-internal-flags-legacy.mjs',
   '^svelte$': '<rootDir>/webview/node_modules/svelte/src/runtime/index.js',
@@ -31,5 +38,6 @@ module.exports = {
     '^pg$': '<rootDir>/test/__mocks__/pg.cjs'
   },
   // Treat TypeScript and Svelte files as ESM so transformers receive ESM source
+  // Note: .mjs is always treated as ESM by Node/Jest and must not be listed here.
   extensionsToTreatAsEsm: ['.ts', '.svelte']
 };

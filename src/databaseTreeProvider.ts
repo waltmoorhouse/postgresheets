@@ -232,6 +232,7 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     }
 
     private getStatusIcon(status: ConnectionStatus): vscode.ThemeIcon {
+        // Color blind users might not be able to see these, but we can still have them for people with color vision.
         switch (status) {
             case 'connected':
                 return new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.green'));
@@ -248,9 +249,8 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     }
 
     private formatStatusLabel(status: ConnectionStatus): string {
-        // Provide a glyph plus a short status so users do not rely on
-        // color alone (e.g. green circle). Shapes give an additional
-        // visual cue for colorblind users.
+        // Provide a glyph plus a short status so users do not rely on  color alone (e.g. green circle). 
+        // Shapes give an additional visual cue for colorblind users.
         switch (status) {
             case 'connected':
                 return '✔ Connected';

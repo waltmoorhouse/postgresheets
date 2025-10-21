@@ -487,6 +487,12 @@
     updateCell(row, column, target?.value ?? '');
   }
 
+  function handleEnumSelectChange(row: RowState, column: ColumnInfo, event: Event): void {
+    const target = event.target as HTMLSelectElement | null;
+    const value = target ? target.value : '';
+    updateCell(row, column, value === '' ? null : value);
+  }
+
   function openJsonEditor(row: RowState, column: ColumnInfo): void {
     jsonEditorOpen = true;
     jsonEditorRow = rows.find((current) => current.id === row.id) ?? row;
@@ -1228,7 +1234,7 @@
                     <select
                       disabled={row.deleted}
                       value={row.current[column.name] ?? ''}
-                      on:change={(event) => updateCell(row, column, (event.target as HTMLSelectElement).value === '' ? null : (event.target as HTMLSelectElement).value)}
+                      on:change={(event) => handleEnumSelectChange(row, column, event)}
                     >
                       <option value="">NULL</option>
                       {#each column.enumValues as option}

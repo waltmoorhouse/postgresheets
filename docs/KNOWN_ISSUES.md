@@ -11,7 +11,7 @@
 - Colorblind users see a clear glyph (check/X/gear/hourglass) and short text which does not rely solely on color.
 - Tooltips include an explicit plain-text status label for screen readers and clarity.
 
-**Priority:** Low → Low (Accessibility improvement)
+**Priority:** High (Accessibility improvement)
 
 **Status:** Fixed
 
