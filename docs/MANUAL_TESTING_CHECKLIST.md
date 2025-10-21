@@ -792,22 +792,206 @@ _____________________________________________
 
 ---
 
-## 24. Data Integrity Verification
+## 25. CSV Export Feature
 
-### After CRUD Operations
-☐ Use external tool (psql, pgAdmin) to verify:  
-  ☐ INSERTs actually inserted  
-  ☐ UPDATEs modified correct rows  
-  ☐ DELETEs removed correct rows  
-  ☐ Composite keys preserved  
-  ☐ Special characters intact  
-  ☐ NULL vs empty string correct  
-  ☐ JSON structure valid  
+### Basic Export
+☐ Right-click table → "Export as CSV" appears  
+☐ Dialog appears asking for header preference  
+☐ File save dialog opens with sensible default name  
+☐ Can select different directory  
+☐ Can change filename  
+☐ CSV file created successfully  
+
+### CSV Content Verification
+☐ Headers included when selected  
+☐ Headers omitted when deselected  
+☐ All rows exported correctly  
+☐ All columns exported correctly  
+☐ Special characters properly escaped  
+☐ Quotes handled correctly (RFC 4180)  
+☐ Commas within fields escaped  
+☐ Newlines handled  
+☐ NULL values exported as empty  
+
+### CSV Roundtrip
+☐ Export data  
+☐ Open in Excel/Sheets  
+☐ Data displays correctly  
+☐ Special characters visible  
+☐ No data corruption  
+☐ File size reasonable  
+
+### Accessibility - CSV Export
+☐ Tab navigates through dialog  
+☐ Enter/Space activates buttons  
+☐ Header selection quick pick keyboard navigable  
+☐ File save dialog accessible  
+☐ Screen reader announces options  
+☐ Focus visible at all times  
 
 **Notes:**
 _____________________________________________
 
 ---
+
+## 26. CSV Import Feature
+
+### File Selection
+☐ Right-click table → "Import from CSV" appears  
+☐ File picker dialog opens  
+☐ Can navigate to file location  
+☐ CSV files visible in picker  
+☐ Can select CSV file  
+☐ Can cancel file selection  
+
+### Header Detection
+☐ Dialog asks if first row is headers  
+☐ "Yes" option selected by default  
+☐ "No" option available  
+☐ Can switch between options  
+☐ Keyboard navigable  
+
+### Column Mapping
+☐ Mapping preview shows before import  
+☐ CSV columns mapped to table columns  
+☐ Header names auto-matched to column names  
+☐ Mapping accurate and complete  
+☐ Can review mapping before proceeding  
+
+### Type Conversion
+☐ Boolean values correctly converted  
+☐ Integer values correctly converted  
+☐ Float/Numeric values correctly converted  
+☐ Date values correctly converted  
+☐ Timestamp values correctly converted  
+☐ JSON values correctly parsed  
+☐ UUID values correctly formatted  
+☐ Empty cells converted to NULL  
+☐ Text values preserved correctly  
+
+### Import Execution
+☐ Import button initiates transaction  
+☐ Row count displayed correctly  
+☐ All rows inserted successfully  
+☐ Transaction committed on success  
+☐ Success message appears  
+☐ Table refreshes with new data  
+☐ No duplicate rows  
+
+### Error Handling
+☐ Import fails gracefully on invalid data  
+☐ Transaction rolled back on error  
+☐ Error message displayed  
+☐ Original data untouched  
+☐ User can retry with corrected file  
+
+### Import with Special Cases
+☐ CSV with embedded quotes  
+☐ CSV with embedded commas  
+☐ CSV with newlines in fields  
+☐ CSV with very long fields  
+☐ CSV with NULL/empty values  
+☐ CSV with JSON data  
+☐ CSV with special characters  
+☐ CSV with Unicode characters  
+☐ Large CSV file (1000+ rows)  
+
+### Accessibility - CSV Import
+☐ Tab navigates through dialogs  
+☐ Enter/Space activates buttons  
+☐ File picker keyboard navigable  
+☐ Header selection quick pick accessible  
+☐ Screen reader announces file count  
+☐ Screen reader announces column mapping  
+☐ Focus indicators visible  
+☐ No keyboard traps  
+☐ Escape cancels at any step  
+
+**Notes:**
+_____________________________________________
+
+---
+
+## 27. Query History Feature
+
+### History Recording
+☐ Queries recorded automatically  
+☐ Connection name stored  
+☐ Timestamp recorded  
+☐ Database name stored  
+☐ Execution time captured (if available)  
+☐ History persists across sessions  
+☐ History limit enforced (default 100)  
+
+### History Browsing
+☐ "Query History" command in palette  
+☐ Quick pick shows recent queries  
+☐ Description shows connection and time  
+☐ Can scroll through long list  
+☐ Search works on query text  
+☐ Search works on connection name  
+☐ Queries truncated for display  
+
+### History Actions
+☐ "Copy to Clipboard" option works  
+☐ Query copied exactly as entered  
+☐ "Re-run Query" option appears  
+☐ Re-run functionality (if implemented)  
+☐ Confirmation before destructive queries (if implemented)  
+
+### History Management
+☐ "Clear Query History" command available  
+☐ Confirmation dialog shows  
+☐ All history cleared when confirmed  
+☐ History stays when cancelled  
+☐ Per-connection clearing (if implemented)  
+
+### Accessibility - Query History
+☐ Tab navigates quick picks  
+☐ Arrow keys move through options  
+☐ Enter selects item  
+☐ Escape cancels  
+☐ Screen reader announces query count  
+☐ Screen reader announces descriptions  
+☐ Focus management correct  
+☐ Keyboard shortcuts work from all contexts  
+
+**Notes:**
+_____________________________________________
+
+---
+
+## Issues Found
+
+### Critical Issues
+1. _______________________________________________
+2. _______________________________________________
+3. _______________________________________________
+
+### Major Issues
+1. _______________________________________________
+2. _______________________________________________
+3. _______________________________________________
+
+### Minor Issues
+1. _______________________________________________
+2. _______________________________________________
+3. _______________________________________________
+
+---
+
+## Overall Assessment
+
+**Ready for Release:** ☐ Yes ☐ No ☐ With Reservations
+
+**Comments:**
+_______________________________________________________
+_______________________________________________________
+_______________________________________________________
+
+**Signature:** _______________  **Date:** _______________
+
+```
 
 ## Issues Found
 

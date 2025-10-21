@@ -41,3 +41,32 @@ test('numeric input (bigint) strips letters and leaves digits only', async () =>
   await tick();
   expect(floatInput.value).toBe('1.23');
 });
+
+test('shows inline error icon for invalid initial bigint value and disables Execute', async () => {
+  const postMessage = fn();
+  const vscode = { postMessage, getState: () => undefined, setState: () => undefined } as any;
+  const initState = {
+    schemaName: 'public',
+    tableName: 't',
+    columns: [{ name: 'id', type: 'bigint', nullable: false }],
+    primaryKey: [],
+    rows: [{ id: 'abc' }],
+    currentPage: 0,
+    totalRows: 1,
+    paginationSize: 100,
+    batchMode: true,
+    sort: null,
+    filters: {},
+    searchTerm: ''
+  };
+
+  const { container, getByText } = render(App, { initialState: initState, vscode });
+  // Error icon should be present
+  const errorSpan = container.querySelector('.cell-error') as HTMLElement | null;
+  expect(errorSpan).not.toBeNull();
+  if (errorSpan) expect(errorSpan.title).toMatch(/integer/i);
+
+  // Main Execute button should be disabled
+  const execButton = getByText('Execute') as HTMLButtonElement;
+  expect(execButton).toBeDisabled();
+});

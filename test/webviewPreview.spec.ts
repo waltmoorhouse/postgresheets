@@ -26,9 +26,13 @@ test('Preview SQL shows generated SQL when extension responds', async () => {
   await fireEvent.click(getByText('Preview SQL'));
   expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ command: 'previewSql' }));
 
-  // Simulate extension response
-  window.dispatchEvent(new MessageEvent('message', { data: { command: 'sqlPreview', payload: 'SELECT 1' } }));
+  // Simulate extension success response
+  window.dispatchEvent(new MessageEvent('message', { data: { command: 'sqlPreview', payload: 'SELECT 1', error: false } }));
 
   // The modal should now show the SQL
   expect(await findByText(/SELECT 1/)).toBeTruthy();
+
+  // Simulate extension error response and ensure error banner is displayed
+  window.dispatchEvent(new MessageEvent('message', { data: { command: 'sqlPreview', payload: '/* Failed to generate SQL: test error */', error: true } }));
+  expect(await findByText(/Error generating SQL/)).toBeTruthy();
 });

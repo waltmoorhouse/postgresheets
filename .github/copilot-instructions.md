@@ -100,6 +100,7 @@ try {
 - Icons defined in `package.json` contributions
 - Command visibility controlled by `when` clauses
 - Always use Svlete for all UI work!
+- Always make sure any UI changes are accessibility minded.
 
 ### Performance Optimization
 - Connection pooling already implemented
@@ -108,3 +109,4 @@ try {
 
 ## Changelog
 - Always update CHANGELOG.md when adding features or fixing major bugs
+- Always ensure the KNOWN_ISSUES, README, MANUAL_TESTING_CHECKLIST, and TESTING docs are updated when necessary.

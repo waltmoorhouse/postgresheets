@@ -86,6 +86,8 @@ export class DataEditor {
     private readonly panelState = new Map<vscode.WebviewPanel, PanelState>();
     private paginationSize = 100;
     private batchMode = true;
+    // Cache schema/enum metadata keyed by panel key (connection:schema.table)
+    private schemaCache: Map<string, { columns: ColumnInfo[]; columnsResultRows: any[]; enumLabelsByOid: Record<number, string[]> }> = new Map();
 
     constructor(context: vscode.ExtensionContext, connectionManager: ConnectionManager) {
         this.context = context;
@@ -135,6 +137,8 @@ export class DataEditor {
             this.panels.delete(panelKey);
             this.initializedPanels.delete(panel);
             this.panelState.delete(panel);
+            // Remove cached schema metadata for this panel to free memory
+            this.schemaCache.delete(panelKey);
         });
 
         await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
@@ -205,106 +209,114 @@ export class DataEditor {
         this.connectionManager.markBusy(connectionId);
 
         try {
-            // Fetch typed column information including type OIDs so we can
-            // detect enums and array element types accurately.
-            const columnsResult = await client.query(
-                `SELECT a.attname AS column_name,
-                        pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
-                        NOT a.attnotnull AS is_nullable,
-                        t.oid AS typoid,
-                        t.typname AS typname,
-                        t.typtype AS typtype,
-                        t.typelem AS typelem
-                 FROM pg_attribute a
-                 JOIN pg_class c ON a.attrelid = c.oid
-                 JOIN pg_namespace n ON c.relnamespace = n.oid
-                 JOIN pg_type t ON a.atttypid = t.oid
-                 WHERE n.nspname = $1
-                   AND c.relname = $2
-                   AND a.attnum > 0
-                   AND NOT a.attisdropped
-                 ORDER BY a.attnum;`,
-                [schemaName, tableName]
-            );
-
-            // Map basic column metadata and collect candidate type OIDs for
-            // additional inspection (enums & element types).
-            const columns: ColumnInfo[] = [];
-            const candidateTypeOids: number[] = [];
-            for (const r of columnsResult.rows) {
-                const typoid = Number(r.typoid) || 0;
-                const typelem = Number(r.typelem) || 0;
-                if (typoid) candidateTypeOids.push(typoid);
-                if (typelem) candidateTypeOids.push(typelem);
-                columns.push({
-                    name: r.column_name,
-                    type: r.data_type,
-                    nullable: Boolean(r.is_nullable)
-                });
-            }
-
-            // Deduplicate OIDs
-            const uniqueTypeOids = Array.from(new Set(candidateTypeOids));
-
-            // Fetch type metadata for the collected type OIDs so we can detect
-            // which are enum types and which are array element types.
-            const typeInfoMap: Record<number, { typname: string; typtype: string; typelem: number; oid: number }> = {};
-            if (uniqueTypeOids.length > 0) {
-                const typeRows = await client.query(
-                    `SELECT oid, typname, typtype, typelem FROM pg_type WHERE oid = ANY($1::oid[])`,
-                    [uniqueTypeOids]
+            const cacheKey = `${connectionId}:${schemaName}.${tableName}`;
+            let cached = this.schemaCache.get(cacheKey);
+            let columns: ColumnInfo[] = [];
+            let columnsResultRows: any[] = [];
+            let enumLabelsByOid: Record<number, string[]> = {};
+            if (cached) {
+                ({ columns, columnsResultRows, enumLabelsByOid } = cached);
+            } else {
+                // Fetch typed column information including type OIDs so we can
+                // detect enums and array element types accurately.
+                const columnsResult = await client.query(
+                    `SELECT a.attname AS column_name,
+                            pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+                            NOT a.attnotnull AS is_nullable,
+                            t.oid AS typoid,
+                            t.typname AS typname,
+                            t.typtype AS typtype,
+                            t.typelem AS typelem
+                     FROM pg_attribute a
+                     JOIN pg_class c ON a.attrelid = c.oid
+                     JOIN pg_namespace n ON c.relnamespace = n.oid
+                     JOIN pg_type t ON a.atttypid = t.oid
+                     WHERE n.nspname = $1
+                       AND c.relname = $2
+                       AND a.attnum > 0
+                       AND NOT a.attisdropped
+                     ORDER BY a.attnum;`,
+                    [schemaName, tableName]
                 );
-                for (const tr of typeRows.rows) {
-                    typeInfoMap[Number(tr.oid)] = {
-                        typname: tr.typname,
-                        typtype: tr.typtype,
-                        typelem: Number(tr.typelem) || 0,
-                        oid: Number(tr.oid)
-                    };
-                }
-            }
 
-            // Identify enum type OIDs to fetch their labels
-            const enumTypeOids: number[] = [];
-            for (const oidStr of Object.keys(typeInfoMap)) {
-                const oid = Number(oidStr);
-                const info = typeInfoMap[oid];
-                if (info && info.typtype === 'e') {
-                    enumTypeOids.push(oid);
+                // Map basic column metadata and collect candidate type OIDs for
+                // additional inspection (enums & element types).
+                const candidateTypeOids: number[] = [];
+                for (const r of columnsResult.rows) {
+                    const typoid = Number(r.typoid) || 0;
+                    const typelem = Number(r.typelem) || 0;
+                    if (typoid) candidateTypeOids.push(typoid);
+                    if (typelem) candidateTypeOids.push(typelem);
+                    columns.push({
+                        name: r.column_name,
+                        type: r.data_type,
+                        nullable: Boolean(r.is_nullable)
+                    });
+                    columnsResultRows.push(r);
                 }
-            }
 
-            // Also check array element types referenced by columns for enum element types
-            for (const colRow of columnsResult.rows) {
-                const elemOid = Number(colRow.typelem) || 0;
-                if (elemOid && typeInfoMap[elemOid] && typeInfoMap[elemOid].typtype === 'e') {
-                    if (!enumTypeOids.includes(elemOid)) {
-                        enumTypeOids.push(elemOid);
+                // Deduplicate OIDs
+                const uniqueTypeOids = Array.from(new Set(candidateTypeOids));
+
+                // Fetch type metadata for the collected type OIDs so we can detect
+                // which are enum types and which are array element types.
+                const typeInfoMap: Record<number, { typname: string; typtype: string; typelem: number; oid: number }> = {};
+                if (uniqueTypeOids.length > 0) {
+                    const typeRows = await client.query(
+                        `SELECT oid, typname, typtype, typelem FROM pg_type WHERE oid = ANY($1::oid[])`,
+                        [uniqueTypeOids]
+                    );
+                    for (const tr of typeRows.rows) {
+                        typeInfoMap[Number(tr.oid)] = {
+                            typname: tr.typname,
+                            typtype: tr.typtype,
+                            typelem: Number(tr.typelem) || 0,
+                            oid: Number(tr.oid)
+                        };
                     }
                 }
-            }
 
-            // Fetch enum labels grouped by enum type oid
-            const enumLabelsByOid: Record<number, string[]> = {};
-            if (enumTypeOids.length > 0) {
-                const enumRows = await client.query(
-                    `SELECT enumtypid::oid AS enumtypid, enumlabel
-                     FROM pg_enum
-                     WHERE enumtypid = ANY($1::oid[])
-                     ORDER BY enumtypid, enumsortorder`,
-                    [enumTypeOids]
-                );
-                for (const er of enumRows.rows) {
-                    const typ = Number(er.enumtypid);
-                    enumLabelsByOid[typ] = enumLabelsByOid[typ] || [];
-                    enumLabelsByOid[typ].push(String(er.enumlabel));
+                // Identify enum type OIDs to fetch their labels
+                const enumTypeOids: number[] = [];
+                for (const oidStr of Object.keys(typeInfoMap)) {
+                    const oid = Number(oidStr);
+                    const info = typeInfoMap[oid];
+                    if (info && info.typtype === 'e') {
+                        enumTypeOids.push(oid);
+                    }
                 }
-            }
 
-            // Attach enum labels to matching columns (either the column type
-            // itself is an enum or its element type is an enum). Use the
-            // shared helper so behavior is testable in isolation.
-            applyEnumLabelsToColumns(columns, columnsResult.rows, enumLabelsByOid);
+                // Also check array element types referenced by columns for enum element types
+                for (const colRow of columnsResult.rows) {
+                    const elemOid = Number(colRow.typelem) || 0;
+                    if (elemOid && typeInfoMap[elemOid] && typeInfoMap[elemOid].typtype === 'e') {
+                        if (!enumTypeOids.includes(elemOid)) {
+                            enumTypeOids.push(elemOid);
+                        }
+                    }
+                }
+
+                // Fetch enum labels grouped by enum type oid
+                if (enumTypeOids.length > 0) {
+                    const enumRows = await client.query(
+                        `SELECT enumtypid::oid AS enumtypid, enumlabel
+                         FROM pg_enum
+                         WHERE enumtypid = ANY($1::oid[])
+                         ORDER BY enumtypid, enumsortorder`,
+                        [enumTypeOids]
+                    );
+                    for (const er of enumRows.rows) {
+                        const typ = Number(er.enumtypid);
+                        enumLabelsByOid[typ] = enumLabelsByOid[typ] || [];
+                        enumLabelsByOid[typ].push(String(er.enumlabel));
+                    }
+                }
+
+                // Attach enum labels to matching columns and cache
+                applyEnumLabelsToColumns(columns, columnsResultRows, enumLabelsByOid);
+                cached = { columns, columnsResultRows, enumLabelsByOid };
+                this.schemaCache.set(cacheKey, cached);
+            }
 
             const pkResult = await client.query(
                 `SELECT a.attname
@@ -454,13 +466,15 @@ export class DataEditor {
                     ? (payload as { changes?: GridChange[] }).changes ?? []
                     : [];
                 const batchMode = Boolean((payload as { batchMode?: boolean })?.batchMode);
+                const bypassValidation = Boolean((payload as { bypassValidation?: boolean })?.bypassValidation);
                 await this.executeChanges(
                     panel,
                     connectionId,
                     schemaName,
                     tableName,
                     changes,
-                    batchMode
+                    batchMode,
+                    bypassValidation
                 );
                 break;
             }
@@ -533,7 +547,8 @@ export class DataEditor {
         schemaName: string,
         tableName: string,
         changes: GridChange[],
-        batchMode: boolean
+        batchMode: boolean,
+        bypassValidation: boolean = false
     ): Promise<void> {
         this.batchMode = batchMode;
 
@@ -547,6 +562,36 @@ export class DataEditor {
             panel.webview.postMessage({ command: 'showMessage', text: 'No pending changes to execute.' });
             panel.webview.postMessage({ command: 'executionComplete', success: true });
             return;
+        }
+
+        // Perform server-side validation to guard against obvious
+        // client-side bypasses (e.g. non-numeric values for numeric columns)
+        // unless the user explicitly requested to bypass validation.
+        if (!bypassValidation) {
+            try {
+                const { validateChangesAgainstSchema } = await import('./sqlValidator');
+                // Use cached schema metadata when possible to speed up validation.
+                const cacheKey = `${connectionId}:${schemaName}.${tableName}`;
+                const cached = this.schemaCache.get(cacheKey);
+                let validationErrors: string[] = [];
+                if (cached) {
+                    // If cached, the validator can rely on the provided client but
+                    // may avoid querying type OIDs for enums; pass through as normal
+                    validationErrors = await validateChangesAgainstSchema(client, schemaName, tableName, changes);
+                } else {
+                    validationErrors = await validateChangesAgainstSchema(client, schemaName, tableName, changes);
+                }
+                if (validationErrors.length > 0) {
+                    const message = `Validation failed:\n${validationErrors.join('\n')}`;
+                    panel.webview.postMessage({ command: 'executionComplete', success: false, error: message });
+                    return;
+                }
+            } catch (validationErr) {
+                // If validation infrastructure fails, surface a readable error
+                const m = validationErr instanceof Error ? validationErr.message : String(validationErr);
+                panel.webview.postMessage({ command: 'executionComplete', success: false, error: `Validation step failed: ${m}` });
+                return;
+            }
         }
 
         this.connectionManager.markBusy(connectionId);
@@ -605,7 +650,8 @@ export class DataEditor {
             payload = `/* Failed to generate SQL: ${err instanceof Error ? err.message : String(err)} */`;
         }
 
-        panel.webview.postMessage({ command: 'sqlPreview', payload });
+    const isError = typeof payload === 'string' && payload.startsWith('/* Failed to generate SQL');
+    panel.webview.postMessage({ command: 'sqlPreview', payload, error: isError });
     }
 
     private buildWebviewHtml(webview: vscode.Webview, state: TableStatePayload): string {

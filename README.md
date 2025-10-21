@@ -12,6 +12,11 @@ A VSCode extension that lets you connect to PostgreSQL databases and edit table 
 - 🔄 **Transaction Control** - Choose between batch transactions or immediate execution
 - 👁️ **SQL Preview** - Preview generated SQL before execution
 - 📄 **Pagination** - Handle large tables with 100-row pagination
+- 💾 **CSV Export** - Export table data to CSV format with optional headers
+- � **CSV Import** - Import data from CSV files with automatic column mapping and type conversion
+- �📋 **Query History** - Automatic query tracking with search and clipboard integration
+- ♿ **Full Keyboard Navigation** - All features accessible via keyboard
+- 🔊 **Screen Reader Support** - WCAG 2.1 Level AA accessibility compliance
 
 ## Discalimer
 
@@ -110,6 +115,82 @@ However, when using code created with GenAI (or really when installing any VSCod
 - Each page shows 100 rows
 - Use "Previous" and "Next" buttons to navigate
 - Total row count and page number displayed at bottom
+
+### CSV Export
+
+1. Open a table in the data editor
+2. Click the "Export as CSV" button (or use Command Palette: `PostgreSQL: Export Table as CSV`)
+3. Choose whether to include column headers:
+   - **Yes** - CSV will include header row with column names
+   - **No** - CSV will only include data rows
+4. Select save location in the file dialog
+5. File is saved and confirmation message appears
+
+**CSV Format:**
+- RFC 4180 compliant format
+- Properly escapes special characters (quotes, commas, newlines)
+- Handles NULL values as empty cells
+- Compatible with Excel, Google Sheets, and other spreadsheet applications
+
+### CSV Import
+
+1. Open a table in the data editor or right-click a table in the tree view
+2. Click the "Import from CSV" button (or use Command Palette: `PostgreSQL: Import Table from CSV`)
+3. Select a CSV file to import in the file picker
+4. Choose whether the first row contains column headers:
+   - **Yes** - First row is treated as header with column names for auto-mapping
+   - **No** - All rows are treated as data
+5. Review the column mapping preview
+   - The extension automatically maps CSV columns to table columns by name
+   - Unmapped columns are skipped
+6. Confirm the import
+   - Shows number of rows to import
+   - All rows are inserted in a single transaction (all-or-nothing)
+7. On success, the table data is refreshed with new rows
+
+**Import Features:**
+- **Smart Type Conversion**: Automatically converts values to the correct PostgreSQL types:
+  - Booleans: Recognizes "true", "false", "yes", "no", "1", "0"
+  - Numbers: Integers and floats parsed correctly
+  - Dates/Timestamps: ISO 8601 formats recognized
+  - JSON: Valid JSON strings parsed to objects
+  - UUIDs: Properly formatted and validated
+  - Enums: Text values matched to enum options
+- **NULL Handling**: Empty cells automatically converted to NULL
+- **Transaction Safety**: All rows inserted together—if any row fails, entire import is rolled back
+- **Column Mapping**: Flexible mapping with auto-detection by column name
+- **Large File Support**: Handles CSV files with thousands of rows efficiently
+
+### Query History
+
+The extension automatically tracks executed queries for easy reference and reuse:
+
+1. **View Query History:**
+   - Use Command Palette: `PostgreSQL: Show Query History`
+   - Quick pick dialog shows recent queries with metadata:
+     - Query text (truncated if long)
+     - Connection name
+     - Database and schema
+     - Execution timestamp
+
+2. **Search and Filter:**
+   - Use the search box in the quick pick to filter by query text or connection name
+   - Most recent queries appear first
+
+3. **Copy Query:**
+   - Select a query and press Enter
+   - Query is copied to clipboard
+   - Modify and execute in any SQL editor
+
+4. **Clear History:**
+   - Use Command Palette: `PostgreSQL: Clear Query History`
+   - Requires confirmation to prevent accidental data loss
+   - Clears all saved queries
+
+**History Limits:**
+- Stores up to 100 most recent queries
+- Persists across VSCode sessions
+- Per-connection history tracking with timestamps
 
 ## Keyboard Shortcuts
 

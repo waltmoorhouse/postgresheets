@@ -14,13 +14,17 @@ test/
 │       ├── index.ts         # Test configuration
 │       ├── connectionManager.test.ts
 │       └── dataEditor.test.ts
-├── dataEditor.integration.test.ts  # Grid operations tests
-├── phase6.additional.test.ts       # Additional Phase 6 tests
-├── schemaDesigner.test.ts          # Schema designer tests
-├── specialCharacters.test.ts       # Special character handling
-├── sqlGenerator.test.ts            # SQL generation tests
-├── tableSqlBuilder.test.ts         # Table SQL builder tests
-└── webviewUpdate.test.ts           # Webview utility tests
+├── dataEditor.integration.test.ts        # Grid operations tests
+├── phase6.additional.test.ts             # Additional Phase 6 tests
+├── schemaDesigner.test.ts                # Schema designer tests
+├── specialCharacters.test.ts             # Special character handling
+├── sqlGenerator.test.ts                  # SQL generation tests
+├── tableSqlBuilder.test.ts               # Table SQL builder tests
+├── webviewUpdate.test.ts                 # Webview utility tests
+├── csvExporter.test.ts                   # CSV export functionality
+├── csvImport.test.ts                     # CSV import functionality
+├── queryHistory.test.ts                  # Query history storage and retrieval
+└── webviewAccessibilityEnhancements.spec.ts  # Accessibility features
 ```
 
 ## Running Tests
@@ -399,6 +403,123 @@ jobs:
 - Backend logic: >90%
 - Critical paths: 100%
 - Edge cases: >80%
+
+### 7. CSV Exporter Tests (`csvExporter.test.ts`)
+
+Tests CSV export and import functionality with proper RFC 4180 compliance.
+
+**Coverage:**
+- Field escaping (quotes, commas, newlines)
+- Header inclusion/exclusion
+- Round-trip consistency (export → parse → export)
+- Special character handling
+- NULL and empty value handling
+- Custom delimiters
+- Quote and escape character customization
+
+**Key Test Cases:**
+```typescript
+// Simple CSV generation
+generateCsv(['name', 'age'], [['Alice', 30]], { includeHeaders: true })
+// Expected: "name,age\nAlice,30"
+
+// Quoted field escaping
+escapeField('Smith, John')  
+// Expected: '"Smith, John"'
+
+// Quote escaping
+escapeField('Product "B"')
+// Expected: '"Product ""B"""'
+
+// Round-trip consistency
+const original = [['Test', 'Value,with,commas']];
+const csv = generateCsv(columns, original);
+const parsed = parseCsv(csv);
+// parsed[0] should equal ['Test', 'Value,with,commas']
+```
+
+### 8. CSV Import Tests (`csvImport.test.ts`)
+
+Tests CSV import functionality including type conversion and column mapping.
+
+**Coverage:**
+- Type conversion (boolean, integer, float, date, timestamp, JSON, UUID)
+- NULL/empty value handling
+- Column mapping validation
+- Row type conversion
+- Large file support
+- Special character handling
+- Round-trip import/export consistency
+- Edge cases (inconsistent columns, very long values)
+
+**Key Test Cases:**
+```typescript
+// Boolean conversion
+convertValue('true', 'boolean')      // true
+convertValue('1', 'boolean')         // true
+convertValue('yes', 'boolean')       // true
+
+// Numeric conversion
+convertValue('42', 'integer')        // 42
+convertValue('3.14', 'numeric')      // 3.14
+
+// Date/Time conversion
+convertValue('2024-01-15', 'date')
+// '2024-01-15'
+
+// JSON conversion
+convertValue('{"key": "value"}', 'json')
+// { key: 'value' }
+
+// Column mapping validation
+const mapping = { 0: 'id', 1: 'name' };
+const tableColumns = ['id', 'name', 'email'];
+const errors = validateMapping(mapping, tableColumns);
+// errors should be empty
+
+// Type conversion for insert
+const row = ['42', 'true', 'Alice'];
+const columnTypes = { 'id': 'integer', 'active': 'boolean', 'name': 'text' };
+const typed = convertRowTypes([row], columnTypes);
+// typed[0] should equal [42, true, 'Alice']
+
+// NULL handling
+convertValue('', 'text')             // null
+convertValue('   ', 'integer')       // null
+```
+
+### 9. Query History Tests (`queryHistory.test.ts`)
+
+Tests query history storage, retrieval, and management.
+
+**Coverage:**
+- Query recording and persistence
+- History limit enforcement
+- Search functionality (query text, connection name)
+- Filtering by connection
+- History clearing (all or per-connection)
+- Entry deletion
+- Persistence across sessions
+- Timestamp and metadata tracking
+
+**Key Test Cases:**
+```typescript
+// Recording queries
+await history.addQuery('SELECT * FROM users', 'conn-1', 'dev-db');
+const entries = history.getHistory();
+// entries should have length 1
+
+// History limit
+for (let i = 0; i < 10; i++) {
+    await history.addQuery(`Query ${i}`, 'conn-1', 'dev-db');
+}
+const limited = new QueryHistory(context, 5);
+// Should only keep 5 most recent
+
+// Search functionality
+history.search('users');  // Finds all queries mentioning 'users'
+history.getByConnection('conn-1');  // Finds all queries from connection
+```
 
 ## Troubleshooting
 

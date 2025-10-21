@@ -79,91 +79,99 @@
 
 ### High Priority
 
-1. **CSV Import/Export**
-   - Status: Not implemented
-   - Impact: Users must use external tools for bulk data operations
-   - Effort: Medium (2-3 days)
+1. **Query History** ✅ COMPLETED
+   - Status: Implemented
+   - Impact: Users can now review and re-run previous queries
+   - Features: Search history, copy to clipboard, persistent storage
+   - Access: Command palette → "Query History"
 
-2. **Query History**
-   - Status: Not implemented
-   - Impact: Cannot review previous queries or changes
-   - Effort: Small (1 day)
+2. **CSV Export** ✅ COMPLETED
+   - Status: Implemented  
+   - Impact: Users can export table data to CSV format
+   - Features: Optional headers, RFC 4180 compliant formatting, accessible file picker
+   - Access: Right-click table → "Export as CSV"
 
-3. **Connection Pooling Configuration**
+3. **CSV Import** ✅ COMPLETED
+   - Status: Implemented
+   - Impact: Users can bulk-load data from CSV files with automatic type conversion
+   - Features: Auto-detection of headers, intelligent column mapping, type conversion (boolean, integer, float, date, timestamp, JSON, UUID), transaction-based import, 32 comprehensive tests
+   - Access: Right-click table → "Import from CSV"
+
+4. **Connection Pooling Configuration**
    - Status: Basic pooling exists but not configurable
    - Impact: Cannot tune for specific workloads
    - Effort: Small (1 day)
 
-4. **Infinite Scroll Option**
+5. **Infinite Scroll Option**
    - Status: Only pagination available
    - Impact: Extra clicks for large datasets
    - Effort: Medium (2-3 days)
 
 ### Medium Priority
 
-5. **ER Diagram View**
+6. **ER Diagram View**
    - Status: Not implemented
    - Impact: Must use external tools to visualize relationships
    - Effort: Large (1-2 weeks)
 
-6. **Visual Query Builder**
+7. **Visual Query Builder**
    - Status: Not implemented
    - Impact: Complex queries require SQL knowledge
    - Effort: Large (2-3 weeks)
 
-7. **Index Management UI**
+8. **Index Management UI**
    - Status: Not implemented
    - Impact: Must use manual SQL for index operations
    - Effort: Medium (3-5 days)
 
-8. **Database Backup/Restore**
+9. **Database Backup/Restore**
    - Status: Not implemented
    - Impact: Must use `pg_dump`/`pg_restore` manually
    - Effort: Large (1-2 weeks)
 
-9. **Permission/Role Management**
-   - Status: Not implemented
-   - Impact: Must use SQL for user/role management
-   - Effort: Large (1-2 weeks)
+10. **Permission/Role Management**
+    - Status: Not implemented
+    - Impact: Must use SQL for user/role management
+    - Effort: Large (1-2 weeks)
 
-10. **Table Statistics View**
+11. **Table Statistics View**
     - Status: Not implemented
     - Impact: No visibility into table size, index usage, etc.
     - Effort: Small (2-3 days)
 
-11. **Stored Procedure Editor**
+12. **Stored Procedure Editor**
     - Status: Not implemented
     - Impact: Must use external editor for procedures/functions
     - Effort: Medium (1 week)
 
 ### Low Priority
 
-12. **Custom Theme Support**
+13. **Custom Theme Support**
     - Status: Uses VS Code themes only
     - Impact: Limited customization
     - Effort: Medium (3-5 days)
 
-13. **Saved Queries/Snippets**
+14. **Saved Queries/Snippets**
     - Status: Not implemented
     - Impact: Must re-type common queries
     - Effort: Small (2-3 days)
 
-14. **Data Visualization Charts**
+15. **Data Visualization Charts**
     - Status: Not implemented
     - Impact: Must export to create visualizations
     - Effort: Large (2-3 weeks)
 
-15. **Schema Comparison Tool**
+16. **Schema Comparison Tool**
     - Status: Not implemented
     - Impact: Must manually compare schemas
     - Effort: Large (1-2 weeks)
 
-16. **Migration Generator**
+17. **Migration Generator**
     - Status: Not implemented
     - Impact: Must write migrations manually
     - Effort: Large (2-3 weeks)
 
-17. **Multi-Connection Comparison**
+18. **Multi-Connection Comparison**
     - Status: Not implemented
     - Impact: Cannot compare across connections
     - Effort: Large (1-2 weeks)

@@ -38,7 +38,7 @@
 - [x] Integrate validation (duplicate column names, incompatible changes) with inline messaging.
 - [x] Hook execution flow to existing extension commands; confirm transactional safety and rollback messaging.
 
-## Phase 5 · Broader No-SQL Workflows
+## Phase 5 · Broader Non-SQL Workflows
 
 - [x] Audit all remaining commands requiring raw SQL input (create table, drop table, index management, custom queries).
 - [x] For each, design graphical flows paralleling the schema designer (forms, wizards, previews) while preserving optional SQL editing panels.

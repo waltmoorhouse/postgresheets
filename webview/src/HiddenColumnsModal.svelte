@@ -8,6 +8,10 @@
   import FocusTrap from '$lib/components/FocusTrap.svelte';
 
   function handleKeydown(e: KeyboardEvent) {
+    // Only handle keydown if it originated from within the dialog
+    if (!dialogElement || !dialogElement.contains(e.target as Node)) {
+      return;
+    }
     // Alt+R to restore all
     if (e.altKey && (e.key === 'r' || e.key === 'R')) {
       if ((hidden ?? []).length > 0) {
@@ -50,6 +54,7 @@
 
   let showHelp = false;
   let shortcutsHeading: HTMLElement | null = null;
+  let dialogElement: HTMLElement | null = null;
 
   function toggleHelp() {
     showHelp = !showHelp;
@@ -62,7 +67,8 @@
 
 <div class="modal-backdrop">
   <FocusTrap ariaLabel="Hidden columns focus trap">
-  <div class="modal dialog hidden-columns" role="dialog" aria-modal="true" aria-label="Hidden columns" tabindex="-1" on:keydown={handleKeydown}>
+  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+  <div class="modal dialog hidden-columns" role="dialog" aria-modal="true" aria-label="Hidden columns" bind:this={dialogElement} on:keydown|capture={handleKeydown}>
     <div class="modal-header">
       <h3>Hidden columns</h3>
   <button type="button" class="help-btn ps-btn ps-btn--icon" aria-expanded={showHelp} aria-controls="shortcuts" aria-label="Keyboard shortcuts" on:click={toggleHelp} title="Keyboard shortcuts (Alt+H)">?

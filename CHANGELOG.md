@@ -5,9 +5,60 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Phase 6: Comprehensive testing and QA (74 passing tests)
+- **CSV Export with Headers**: Users can now export table data to CSV format with optional column headers. Includes accessible file picker dialog and keyboard navigation. Features:
+  - Toggle header inclusion via quick pick
+  - Proper RFC 4180 CSV formatting with quote escaping
+  - Accessible file save dialog
+  - Keyboard shortcuts for all interactions
+- **CSV Import from Files**: Complete CSV import functionality with intelligent column mapping. Features:
+  - File picker dialog to select CSV files for import
+  - Auto-detection of header row
+  - Intelligent column header mapping to table columns
+  - Type conversion for all PostgreSQL types (boolean, integer, float, JSON, date, timestamp, UUID, etc.)
+  - Automatic NULL handling for empty cells
+  - Transaction-based import (all-or-nothing)
+  - Preview of column mapping before import
+  - Keyboard accessible dialogs and confirmations
+  - 32 comprehensive import tests covering edge cases
+- **Query History**: Complete query history tracking with search and management. Features:
+  - Automatic query storage on execution (default: 100 most recent)
+  - Quick pick interface to browse history (keyboard accessible)
+  - Copy query to clipboard or re-run functionality
+  - Search history by query text or connection name
+  - Clear all history or per-connection
+  - Persistent storage in VS Code global state
+- **Accessibility enhancements for new features**:
+  - All dialogs and quick picks fully keyboard accessible
+  - Proper ARIA attributes on all UI elements (implicit through VS Code APIs)
+  - Quick pick descriptions for better screen reader support
+  - Confirmation dialogs prevent accidental actions
+- **Test coverage**: 73 new tests for CSV export, import, and query history (csvExporter.test.ts, csvImport.test.ts, queryHistory.test.ts)
+- **Validation bypass toggle**: Users can now bypass client-side and server-side validation by enabling the "Bypass validation" checkbox in the data editor toolbar. This allows the database to enforce constraints directly, useful for edge cases where client validation is too strict.
+- **Comprehensive accessibility documentation**: New `ACCESSIBILITY.md` and `ACCESSIBILITY_IMPLEMENTATION.md` guides covering WCAG 2.1 compliance, testing, and contributor guidelines
+- **Column resize keyboard support**: Resize handles are now keyboard-accessible buttons supporting arrow keys and shift modifiers for width adjustment
+- **ARIA live region announcements**: Dynamic status updates (page changes, row selections, data updates) now announced to screen reader users
+- **Enhanced row selection**: Multi-row Shift+Click selection now includes keyboard hints and full keyboard support
+- **Pagination navigation landmarks**: Pagination controls now marked as navigation regions with proper ARIA attributes
+- **Search and filter accessibility**: Search inputs include proper labels, ARIA attributes, and help text
+- **Data table semantics**: Tables now use proper ARIA roles (grid) with column headers and cell relationships
+- **Focus management improvements**: All interactive elements have clear, visible focus indicators with proper tab order
+- **Input validation accessibility**: Form validation errors properly associated with inputs via aria-describedby with immediate announcements
+- Phase 6: Comprehensive testing and QA (175 passing tests including new CSV/history tests)
+- Server-side validation for data changes: validates integers, numerics, booleans, enum values, array-of-enum elements, dates/timestamps, and UUIDs before execution
+- Per-cell inline validation error indicators with accessible aria attributes and tooltips
+- Schema/enum metadata caching per panel to reduce database queries during large batch operations
 - Integration test infrastructure (VS Code test runner + example suites)
 - Extensive documentation: TESTING.md, MANUAL_TESTING_CHECKLIST.md, KNOWN_ISSUES.md
+
+### Fixed - Accessibility
+- **Removed all build-time accessibility warnings**: Fixed all Svelte a11y linter warnings
+  - Removed incorrect `aria-invalid` attribute from button elements
+  - Fixed keyboard event handling on dialog elements using proper event modifiers
+  - Ensured all form controls (input, select, checkbox) have proper aria attributes
+- **Enhanced form validation accessibility**: All validation errors now properly linked to form controls with `aria-describedby`
+- **Improved modal keyboard interaction**: Dialog keyboard shortcuts (Alt+R, Alt+H, Esc) properly handled with accessible event flow
+- **JSON editor button state**: Error state now conveyed through adjacent icon and aria attributes instead of button role
+
 
 ### Testing / CI
 - Aligned Svelte runtime used by the Jest transform and test runtime with the webview Svelte installation (Svelte v4) so compiled webview components run reliably under Jest.

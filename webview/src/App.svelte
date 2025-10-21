@@ -54,6 +54,7 @@
   let searchTerm = '';
   let sqlPreview = '';
   let sqlPreviewOpen = false;
+  let sqlPreviewIsError = false;
   let previewLoading = false;
   let executionMessage = '';
   let executionError = '';
@@ -65,6 +66,12 @@
   let columnWidths: Record<string, number> = {};
   let resetDraftState = false;
   let discardDraftForNextLoad = false;
+  let bypassValidation = false;
+
+  $: hasValidationErrors = rows.some(r => {
+    if (!r || !r.validation) return false;
+    return Object.values(r.validation).some(v => v !== null && v !== undefined);
+  });
 
   // Column preferences / manager
   let hiddenColumnsSet: Set<string> = new Set();
@@ -116,6 +123,9 @@
   let resizeStartWidth = 0;
   let activeResizePointerId: number | null = null;
   let activeResizeHandle: HTMLElement | null = null;
+  let resizingColumnKeyboard: string | null = null;
+  let ariaLiveMessage = '';
+  let selectionRangeStart: number | null = null;
 
   // JSON modal state
   let jsonEditorOpen = false;
@@ -180,14 +190,21 @@
       const original = deepClone(row);
       const key = buildRowKey(original);
       const draft = updateSnapshot[key];
+      const current = draft ? deepClone(draft.current) : deepClone(row);
+      // Compute initial validation for each column so any invalid values
+      // received from the server are surfaced client-side immediately.
+      const validation: Record<string, string | null> = {};
+      for (const col of columns) {
+        validation[col.name] = validateCellValue(current[col.name], col);
+      }
       return {
         id: index + 1,
         original,
-        current: draft ? deepClone(draft.current) : deepClone(row),
+        current,
         selected: false,
         isNew: false,
         deleted: draft?.deleted ?? false,
-        validation: {}
+        validation
       };
     });
     if (snapshot?.inserts?.length) {
@@ -305,6 +322,12 @@
     return raw;
   }
 
+  function errorId(rowId: number, columnName: string): string {
+    // Produce a DOM-safe id by replacing non-alphanum chars
+    const safe = String(columnName).replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `cell-error-${rowId}-${safe}`;
+  }
+
   function formatCellValue(value: unknown, column: ColumnInfo): string {
     if (value === null || value === undefined) {
       return '';
@@ -391,8 +414,35 @@
     });
     if (!checked) {
       selectAll = false;
+      selectionRangeStart = null;
     } else {
       selectAll = rows.every((current) => current.deleted || current.selected);
+      selectionRangeStart = row.id;
+      ariaLiveMessage = `Row ${row.id} selected`;
+    }
+  }
+
+  function handleRowCheckboxClick(row: RowState, event: MouseEvent): void {
+    if (event.shiftKey && selectionRangeStart !== null) {
+      // Range selection with Shift+Click
+      event.preventDefault();
+      const startIdx = rows.findIndex(r => r.id === selectionRangeStart);
+      const endIdx = rows.findIndex(r => r.id === row.id);
+      
+      if (startIdx !== -1 && endIdx !== -1) {
+        const [min, max] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+        const selectedCount = max - min + 1;
+        
+        rows = rows.map((r, idx) => {
+          if (idx >= min && idx <= max && !r.deleted) {
+            return { ...r, selected: true };
+          }
+          return r;
+        });
+        
+        selectAll = rows.every((current) => current.deleted || current.selected);
+        ariaLiveMessage = `Selected ${selectedCount} rows from row ${Math.min(selectionRangeStart, row.id)} to row ${Math.max(selectionRangeStart, row.id)}`;
+      }
     }
   }
 
@@ -745,6 +795,28 @@
     attachResizeListeners(event, target);
   }
 
+  function handleResizeKeydown(column: ColumnInfo, event: KeyboardEvent): void {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const currentWidth = columnWidths[column.name] || 100;
+      const newWidth = Math.max(60, currentWidth - 10);
+      setColumnWidth(column.name, newWidth);
+      resizingColumnKeyboard = column.name;
+      ariaLiveMessage = `${column.name} column width reduced to ${newWidth} pixels`;
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const currentWidth = columnWidths[column.name] || 100;
+      const newWidth = currentWidth + 10;
+      setColumnWidth(column.name, newWidth);
+      resizingColumnKeyboard = column.name;
+      ariaLiveMessage = `${column.name} column width increased to ${newWidth} pixels`;
+    } else if (event.key === 'Enter' || event.key === 'Escape') {
+      event.preventDefault();
+      resizingColumnKeyboard = null;
+      persistColumnWidths();
+    }
+  }
+
   function attachResizeListeners(event: ResizeEvent, handle: HTMLElement): void {
     if ('pointerId' in event) {
       activeResizePointerId = event.pointerId;
@@ -888,28 +960,31 @@
 
   function requestPreview(): void {
     const changes = gatherChanges();
-    // Client-side validation: block preview when validation errors exist.
+    // Client-side validation: block preview when validation errors exist (unless bypassed).
     const errors = rows.flatMap((r) =>
       Object.entries(r.validation ?? {})
         .filter(([, v]) => v)
         .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
     );
-    if (errors.length > 0) {
+    if (errors.length > 0 && !bypassValidation) {
       executionError = 'Fix validation errors before generating SQL preview.';
       sqlPreviewOpen = true;
       sqlPreview = '';
       previewLoading = false;
+      sqlPreviewIsError = true;
       return;
     }
 
-    previewLoading = true;
-    sqlPreviewOpen = true;
-    sqlPreview = '';
+  previewLoading = true;
+  sqlPreviewOpen = true;
+  sqlPreview = '';
+  sqlPreviewIsError = false;
     ensureVscode().postMessage({
       command: 'previewSql',
       payload: {
         changes,
-        primaryKey
+        primaryKey,
+        bypassValidation
       }
     });
   }
@@ -926,13 +1001,13 @@
 
   function requestExecution(): void {
     const changes = gatherChanges();
-    // Block execution while there are client-side validation errors
+    // Block execution while there are client-side validation errors (unless bypassed)
     const errors = rows.flatMap((r) =>
       Object.entries(r.validation ?? {})
         .filter(([, v]) => v)
         .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
     );
-    if (errors.length > 0) {
+    if (errors.length > 0 && !bypassValidation) {
       executionError = 'Fix validation errors before executing changes.';
       executionMessage = '';
       return;
@@ -949,7 +1024,8 @@
       command: 'executeChanges',
       payload: {
         changes,
-        batchMode
+        batchMode,
+        bypassValidation
       }
     });
   }
@@ -1022,14 +1098,19 @@
   // and resetting preferences. These invoke the extension via postMessage.
   function requestPage(page: number): void {
     ensureVscode().postMessage({ command: 'loadPage', payload: { page } });
+    ariaLiveMessage = `Page ${page + 1} of ${Math.ceil(totalRows / paginationSize)} loaded`;
   }
 
   function executeSearch(): void {
     ensureVscode().postMessage({ command: 'search', payload: { searchTerm: (searchTerm || '').trim() } });
+    ariaLiveMessage = searchTerm?.trim() 
+      ? `Searching for "${searchTerm.trim()}"`
+      : 'Search cleared, showing all rows';
   }
 
   function resetPreferences(): void {
     ensureVscode().postMessage({ command: 'resetTablePreferences' });
+    ariaLiveMessage = 'Column preferences reset to defaults';
   }
 
   function handleColumnManagerSave(e: CustomEvent<{ items: { name: string; type: string; visible: boolean }[] }>) {
@@ -1050,6 +1131,7 @@
     switch (message.command) {
       case 'sqlPreview':
         previewLoading = false;
+        sqlPreviewIsError = Boolean((message as any).error);
         sqlPreview = message.payload && typeof message.payload === 'string' ? String(message.payload) : '';
         sqlPreviewOpen = true;
         break;
@@ -1061,6 +1143,8 @@
           discardDraftForNextLoad = false;
         }
         initialise(message.payload as TableStatePayload);
+        const payload = message.payload as TableStatePayload;
+        ariaLiveMessage = `Table loaded: ${payload.totalRows} rows, page ${payload.currentPage + 1} of ${Math.ceil(payload.totalRows / payload.paginationSize)}`;
         break;
       case 'executionComplete':
         executing = false;
@@ -1160,6 +1244,10 @@
           <input type="checkbox" bind:checked={batchMode}>
           <span>Batch mode</span>
         </label>
+        <label class="bypass-toggle" title="Skip client-side validation and let the database enforce constraints">
+          <input type="checkbox" bind:checked={bypassValidation}>
+          <span>Bypass validation</span>
+        </label>
         <button type="button" class="ps-btn ps-btn--primary" on:click={addRow}>Add row</button>
         <button
           type="button"
@@ -1175,7 +1263,8 @@
           type="button"
           class="ps-btn ps-btn--accent"
           on:click={requestExecution}
-          disabled={executing}
+          disabled={executing || (hasValidationErrors && !bypassValidation)}
+          title={hasValidationErrors && !bypassValidation ? 'Fix validation errors before executing' : undefined}
         >
           Execute
         </button>
@@ -1277,14 +1366,18 @@
                     {/if}
                   </button>
                 </div>
-                <span
+                <button
+                  type="button"
                   class="resize-handle"
+                  tabindex="0"
                   role="separator"
                   aria-orientation="vertical"
-                  aria-hidden="true"
+                  aria-label={`Resize ${column.name} column. Use arrow keys to adjust width.`}
                   on:pointerdown={(event) => startResize(column, event)}
                   on:mousedown={(event) => startResize(column, event)}
-                ></span>
+                  on:keydown={(event) => handleResizeKeydown(column, event)}
+                  title="Drag to resize, or use arrow keys (Left/Right to decrease/increase width)"
+                ></button>
                 <small>{column.type}</small>
               </th>
             {/each}
@@ -1316,38 +1409,50 @@
                   checked={row.selected}
                   disabled={row.deleted}
                   on:change={(event) => toggleRowSelection(row, event)}
+                  on:click={(event) => handleRowCheckboxClick(row, event)}
+                  title="Click to select, Shift+Click to select a range"
                 >
               </td>
               {#each visibleColumns as column}
                 {#if column.enumValues && column.enumValues.length > 0 && !String(column.type).endsWith('[]')}
+                    {@const err = row.validation?.[column.name]}
                   <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
                     <select
                       disabled={row.deleted}
                       value={row.current[column.name] ?? ''}
                       on:change={(event) => handleEnumSelectChange(row, column, event)}
+                      aria-invalid={err ? 'true' : 'false'}
+                      aria-describedby={err ? errorId(row.id, column.name) : undefined}
                     >
                       <option value="">NULL</option>
                       {#each column.enumValues as option}
                         <option value={option}>{option}</option>
                       {/each}
                     </select>
+                    <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                   </td>
                 {:else if column.type === 'boolean' || column.type === 'bool'}
+                    {@const err = row.validation?.[column.name]}
                   <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
                     <input
                       type="checkbox"
                       checked={Boolean(row.current[column.name])}
                       disabled={row.deleted}
                       on:change={(event) => handleBooleanChange(row, column, event)}
+                      aria-invalid={err ? 'true' : 'false'}
+                      aria-describedby={err ? errorId(row.id, column.name) : undefined}
                     >
+                    <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                   </td>
                 {:else if column.type === 'json' || column.type === 'jsonb' || String(column.type).endsWith('[]')}
-                  <td class={clsx('cell json', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
+                    {@const err = row.validation?.[column.name]}
+                  <td class={clsx('cell json', { modified: isColumnModified(row, column), 'cell-error-state': err })} style={columnStyle(column)}>
                     <button
                       type="button"
                       class="ps-btn ps-btn--ghost json-button"
                       disabled={row.deleted}
                       on:click={() => openJsonEditor(row, column)}
+                      aria-describedby={err ? errorId(row.id, column.name) : undefined}
                     >
                       {#if row.current[column.name] === null}
                         <span class="null">NULL</span>
@@ -1359,8 +1464,10 @@
                         {/if}
                       {/if}
                     </button>
+                    <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                   </td>
                 {:else}
+                    {@const err = row.validation?.[column.name]}
                   <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
                     <div class="cell-edit">
                       <input
@@ -1371,6 +1478,8 @@
                         disabled={row.deleted}
                         on:input={(event) => handleTextInput(row, column, event)}
                         class="cell-input"
+                        aria-invalid={err ? 'true' : 'false'}
+                        aria-describedby={err ? errorId(row.id, column.name) : undefined}
                       >
                       <button
                         type="button"
@@ -1381,6 +1490,7 @@
                       >
                         📝
                       </button>
+                      <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                     </div>
                   </td>
                 {/if}
@@ -1411,6 +1521,11 @@
       {#if executionError}
         <div class="message error">{executionError}</div>
       {/if}
+      
+      <!-- ARIA live region for dynamic announcements -->
+      <div role="status" aria-live="polite" aria-atomic="true" class="aria-live-region">
+        {ariaLiveMessage}
+      </div>
     </section>
   </div>
 
@@ -1422,6 +1537,12 @@
         </header>
         {#if previewLoading}
           <p class="preview-status">Generating SQL preview…</p>
+        {:else if sqlPreviewIsError}
+          <div class="sql-error-banner" role="alert" aria-live="polite">
+            <strong>Error generating SQL</strong>
+            <p class="sql-error-msg">{sqlPreview}</p>
+          </div>
+          <pre class="sql-preview">{sqlPreview}</pre>
         {:else if sqlPreview}
           <pre>{sqlPreview}</pre>
         {:else}
@@ -1433,7 +1554,8 @@
             type="button"
             class="ps-btn ps-btn--accent"
             on:click={executeFromPreview}
-            disabled={executing || previewLoading}
+            disabled={executing || previewLoading || (hasValidationErrors && !bypassValidation)}
+            title={hasValidationErrors && !bypassValidation ? 'Fix validation errors before executing' : undefined}
           >
             Execute
           </button>
