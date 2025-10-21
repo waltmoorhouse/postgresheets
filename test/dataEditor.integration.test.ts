@@ -4,11 +4,12 @@
  */
 
 import { SqlGenerator } from '../src/sqlGenerator';
+import type { GridChange } from '../src/types';
 
 describe('DataEditor Grid Operations', () => {
     describe('CRUD Operations', () => {
         test('generates INSERT with all column types', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: {
                     id: 1,
@@ -32,7 +33,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('generates UPDATE with subset of columns', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'update',
                 data: { age: 31, active: false },
                 where: { id: 1 }
@@ -47,7 +48,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('generates UPDATE with composite primary key', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'update',
                 data: { status: 'completed' },
                 where: { user_id: 1, order_id: 100 }
@@ -60,7 +61,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('generates DELETE with single column WHERE', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'delete',
                 where: { id: 42 }
             };
@@ -72,7 +73,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('generates DELETE with multiple WHERE conditions', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'delete',
                 where: { user_id: 1, status: 'pending' }
             };
@@ -87,7 +88,7 @@ describe('DataEditor Grid Operations', () => {
 
     describe('Batch Operations', () => {
         test('handles multiple INSERT operations', () => {
-            const changes = [
+            const changes: GridChange[] = [
                 { type: 'insert', data: { name: 'Alice' } },
                 { type: 'insert', data: { name: 'Bob' } },
                 { type: 'insert', data: { name: 'Charlie' } }
@@ -98,12 +99,14 @@ describe('DataEditor Grid Operations', () => {
             expect(results).toHaveLength(3);
             results.forEach((result, idx) => {
                 expect(result.query).toContain('INSERT INTO "public"."users"');
-                expect(result.values).toEqual([changes[idx].data.name]);
+                if (changes[idx].type === 'insert') {
+                    expect(result.values).toEqual([changes[idx].data.name]);
+                }
             });
         });
 
         test('handles mixed operation batch', () => {
-            const changes = [
+            const changes: GridChange[] = [
                 { type: 'insert', data: { name: 'New User' } },
                 { type: 'update', data: { name: 'Updated' }, where: { id: 1 } },
                 { type: 'delete', where: { id: 2 } }
@@ -119,7 +122,7 @@ describe('DataEditor Grid Operations', () => {
 
     describe('Column Name Edge Cases', () => {
         test('handles reserved SQL keywords as column names', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { select: 'value1', where: 'value2', from: 'value3' }
             };
@@ -132,7 +135,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('handles columns with spaces and special chars', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { 'First Name': 'John', 'E-Mail': 'john@test.com' }
             };
@@ -144,7 +147,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('handles columns with quotes in names', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { 'user"name': 'test' }
             };
@@ -158,7 +161,7 @@ describe('DataEditor Grid Operations', () => {
 
     describe('Table and Schema Name Edge Cases', () => {
         test('handles schema names with special characters', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { name: 'test' }
             };
@@ -169,7 +172,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('handles table names with quotes', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { value: 1 }
             };
@@ -183,7 +186,7 @@ describe('DataEditor Grid Operations', () => {
 
     describe('Data Type Handling', () => {
         test('preserves boolean values', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { flag1: true, flag2: false, flag3: null }
             };
@@ -198,7 +201,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('preserves numeric values', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: {
                     int_val: 42,
@@ -214,7 +217,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('handles arrays', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: {
                     tags: ['tag1', 'tag2', 'tag3'],
@@ -231,7 +234,7 @@ describe('DataEditor Grid Operations', () => {
 
     describe('Empty and Edge Case Values', () => {
         test('handles empty object for INSERT', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: {}
             };
@@ -243,7 +246,7 @@ describe('DataEditor Grid Operations', () => {
         });
 
         test('handles UPDATE with no changes', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'update',
                 data: {},
                 where: { id: 1 }

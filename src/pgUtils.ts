@@ -3,12 +3,7 @@
 // data-editor's parsing/enum-detection behavior can be validated
 // independently from the full WebView/DB codepath.
 
-export interface ColumnInfo {
-  name: string;
-  type: string;
-  nullable: boolean;
-  enumValues?: string[];
-}
+import type { ColumnInfo, QueryResultRow } from './types';
 
 /**
  * Cast a single array element string according to a Postgres element type.
@@ -107,12 +102,16 @@ export function parsePostgresArrayLiteral(literal: string, pgType?: string): unk
  * columnsResultRows should be the rows returned from the
  * pg_attribute/pg_type query (the same shape used in DataEditor).
  */
-export function applyEnumLabelsToColumns(columns: ColumnInfo[], columnsResultRows: any[], enumLabelsByOid: Record<number, string[]>) {
+export function applyEnumLabelsToColumns(
+  columns: ColumnInfo[],
+  columnsResultRows: QueryResultRow[],
+  enumLabelsByOid: Record<number, string[]>
+): ColumnInfo[] {
   for (let i = 0; i < columns.length; i++) {
     const colRow = columnsResultRows[i] ?? {};
     const col = columns[i];
-    const typoid = Number(colRow.typoid) || 0;
-    const typelem = Number(colRow.typelem) || 0;
+    const typoid = Number(colRow.typoid as number | string) || 0;
+    const typelem = Number(colRow.typelem as number | string) || 0;
     if (typoid && enumLabelsByOid[typoid]) {
       col.enumValues = enumLabelsByOid[typoid];
     } else if (typelem && enumLabelsByOid[typelem]) {

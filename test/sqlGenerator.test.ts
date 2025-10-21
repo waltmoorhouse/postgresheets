@@ -1,10 +1,11 @@
 import { SqlGenerator } from '../src/sqlGenerator';
+import type { GridChange } from '../src/types';
 
 describe('SqlGenerator', () => {
     test('generateSql for INSERT', () => {
         const schemaName = 'public';
         const tableName = 'users';
-        const change = {
+        const change: GridChange = {
             type: 'insert',
             data: { name: 'John', age: 30 }
         };
@@ -18,7 +19,7 @@ describe('SqlGenerator', () => {
     test('generateSql for UPDATE', () => {
         const schemaName = 'public';
         const tableName = 'users';
-        const change = {
+        const change: GridChange = {
             type: 'update',
             data: { age: 31 },
             where: { name: 'John' }
@@ -33,7 +34,7 @@ describe('SqlGenerator', () => {
     test('generateSql for DELETE', () => {
         const schemaName = 'public';
         const tableName = 'users';
-        const change = {
+        const change: GridChange = {
             type: 'delete',
             where: { name: 'John' }
         };

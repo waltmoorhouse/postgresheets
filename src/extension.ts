@@ -246,7 +246,7 @@ export function activate(context: vscode.ExtensionContext) {
         }),
 
         // Test-only command to open Add Connection with a custom panelFactory
-        vscode.commands.registerCommand('postgres-editor._testOpenAddConnection', async (panelFactory?: any) => {
+        vscode.commands.registerCommand('postgres-editor._testOpenAddConnection', async (panelFactory?: unknown) => {
             const testWizard = new (require('./addConnectionWizard').AddConnectionWizard)(context, connectionManager, () => treeProvider.refresh(), panelFactory);
             await testWizard.openWizard();
         }),
@@ -448,7 +448,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                     // Convert types and prepare data
                     const typedRows = dataRows.map(row => {
-                        const typedRow: any = {};
+                        const typedRow: Record<string, unknown> = {};
                         for (const [csvIdx, tableCol] of Object.entries(columnMapping)) {
                             const idx = parseInt(csvIdx);
                             const colDef = tableColumns.find(c => c.name === tableCol);
@@ -501,7 +501,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             interface QuickPickItemWithQuery extends vscode.QuickPickItem {
                 query: string;
-                entry: any;
+                entry: unknown;
             }
 
             const items: QuickPickItemWithQuery[] = entries.map(entry => ({

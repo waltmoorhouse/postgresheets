@@ -5,25 +5,20 @@ import { ConnectionManager } from './connectionManager';
 import { DatabaseTreeItem } from './databaseTreeProvider';
 import { SqlGenerator } from './sqlGenerator';
 import { parsePostgresArrayLiteral, applyEnumLabelsToColumns } from './pgUtils';
-
-interface ColumnInfo {
-    name: string;
-    type: string;
-    nullable: boolean;
-    // For enum-typed columns this contains the list of valid labels
-    enumValues?: string[];
-}
-
-interface PrimaryKeyInfo {
-    columns: string[];
-}
-
-interface SortDescriptor {
-    column: string;
-    direction: 'asc' | 'desc';
-}
-
-type FilterMap = Record<string, string>;
+import type {
+    ColumnInfo,
+    PrimaryKeyInfo,
+    SortDescriptor,
+    FilterMap,
+    TablePreferences,
+    TableStatePayload,
+    GridChange,
+    ExtensionToWebviewMessage,
+    WebviewToExtensionMessage,
+    QueryResultRow,
+    ColumnTypeMetadata
+} from './types';
+import { isWebviewToExtension } from './types';
 
 interface PanelState {
     page: number;
@@ -32,50 +27,10 @@ interface PanelState {
     searchTerm: string;
 }
 
-interface TablePreferences {
-    columnOrder?: string[];
-    hiddenColumns?: string[];
-    columnWidths?: Record<string, number>;
-}
-
-interface TableStatePayload {
-    schemaName: string;
-    tableName: string;
+interface CachedSchemaMetadata {
     columns: ColumnInfo[];
-    primaryKey: PrimaryKeyInfo;
-    rows: Record<string, unknown>[];
-    currentPage: number;
-    totalRows: number;
-    paginationSize: number;
-    batchMode: boolean;
-    sort: SortDescriptor | null;
-    filters: FilterMap;
-    searchTerm: string;
-    tablePreferences?: TablePreferences;
-}
-
-interface GridChangeInsert {
-    type: 'insert';
-    data: Record<string, unknown>;
-}
-
-interface GridChangeUpdate {
-    type: 'update';
-    data: Record<string, unknown>;
-    where: Record<string, unknown>;
-}
-
-interface GridChangeDelete {
-    type: 'delete';
-    where: Record<string, unknown>;
-}
-
-type GridChange = GridChangeInsert | GridChangeUpdate | GridChangeDelete;
-
-interface WebviewMessage {
-    command: string;
-    payload?: unknown;
-    [key: string]: unknown;
+    columnsResultRows: QueryResultRow[];
+    enumLabelsByOid: Record<number, string[]>;
 }
 
 export class DataEditor {
@@ -87,7 +42,7 @@ export class DataEditor {
     private paginationSize = 100;
     private batchMode = true;
     // Cache schema/enum metadata keyed by panel key (connection:schema.table)
-    private schemaCache: Map<string, { columns: ColumnInfo[]; columnsResultRows: any[]; enumLabelsByOid: Record<number, string[]> }> = new Map();
+    private schemaCache: Map<string, CachedSchemaMetadata> = new Map();
 
     constructor(context: vscode.ExtensionContext, connectionManager: ConnectionManager) {
         this.context = context;
@@ -127,7 +82,11 @@ export class DataEditor {
         this.panels.set(panelKey, panel);
         this.panelState.set(panel, this.createDefaultPanelState());
 
-        const messageDisposable = panel.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
+        const messageDisposable = panel.webview.onDidReceiveMessage(async (message: WebviewToExtensionMessage | unknown) => {
+            if (!isWebviewToExtension(message)) {
+                vscode.window.showErrorMessage('Invalid webview message received');
+                return;
+            }
             await this.handleMessage(message, panel, connectionId, schemaName, tableName);
         });
         this.context.subscriptions.push(messageDisposable);
@@ -443,101 +402,114 @@ export class DataEditor {
     }
 
     private async handleMessage(
-        message: WebviewMessage,
+        message: WebviewToExtensionMessage,
         panel: vscode.WebviewPanel,
         connectionId: string,
         schemaName: string,
         tableName: string
     ): Promise<void> {
-        if (!message || typeof message !== 'object') {
-            return;
-        }
-
-        const { command, payload } = message;
-
-        switch (command) {
-            case 'loadPage': {
-                const page = Math.max(0, Number((payload as { page?: number })?.page ?? 0));
-                await this.loadTableData(panel, connectionId, schemaName, tableName, page);
-                break;
-            }
-            case 'executeChanges': {
-                const changes = Array.isArray((payload as { changes?: GridChange[] })?.changes)
-                    ? (payload as { changes?: GridChange[] }).changes ?? []
-                    : [];
-                const batchMode = Boolean((payload as { batchMode?: boolean })?.batchMode);
-                const bypassValidation = Boolean((payload as { bypassValidation?: boolean })?.bypassValidation);
-                await this.executeChanges(
-                    panel,
-                    connectionId,
-                    schemaName,
-                    tableName,
-                    changes,
-                    batchMode,
-                    bypassValidation
-                );
-                break;
-            }
-            case 'previewSql': {
-                const changes = Array.isArray((payload as { changes?: GridChange[] })?.changes)
-                    ? (payload as { changes?: GridChange[] }).changes ?? []
-                    : [];
-                await this.previewSql(
-                    panel,
-                    schemaName,
-                    tableName,
-                    changes
-                );
-                break;
-            }
-            case 'search': {
-                const state = this.getPanelState(panel);
-                const rawTerm = typeof (payload as { searchTerm?: unknown })?.searchTerm === 'string'
-                    ? (payload as { searchTerm?: string }).searchTerm
-                    : '';
-                state.searchTerm = rawTerm ?? '';
-                state.page = 0;
-                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
-                break;
-            }
-            case 'applySort': {
-                const nextSort = (payload as { sort?: SortDescriptor | null })?.sort ?? null;
-                const state = this.getPanelState(panel);
-                state.sort = nextSort && nextSort.column && nextSort.direction ? nextSort : null;
-                state.page = 0;
-                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
-                break;
-            }
-            case 'applyFilters': {
-                const incoming = (payload as { filters?: FilterMap })?.filters ?? {};
-                const normalized: FilterMap = {};
-                for (const [key, value] of Object.entries(incoming)) {
-                    if (typeof value === 'string') {
-                        normalized[key] = value;
-                    }
+        try {
+            switch (message.command) {
+                case 'loadPage': {
+                    const page = Math.max(0, Number(message.pageNumber ?? 0));
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, page);
+                    break;
                 }
-                const state = this.getPanelState(panel);
-                state.filters = normalized;
-                state.page = 0;
-                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
-                break;
+                case 'executeChanges': {
+                    const changes = Array.isArray(message.changes) ? message.changes : [];
+                    const batchMode = Boolean(message.batchMode);
+                    const bypassValidation = Boolean(message.bypassValidation);
+                    await this.executeChanges(
+                        panel,
+                        connectionId,
+                        schemaName,
+                        tableName,
+                        changes,
+                        batchMode,
+                        bypassValidation
+                    );
+                    break;
+                }
+                case 'previewChanges': {
+                    const changes = Array.isArray(message.changes) ? message.changes : [];
+                    await this.previewSql(
+                        panel,
+                        schemaName,
+                        tableName,
+                        changes
+                    );
+                    break;
+                }
+                case 'search': {
+                    const state = this.getPanelState(panel);
+                    const rawTerm = typeof message.term === 'string' ? message.term : '';
+                    state.searchTerm = rawTerm ?? '';
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'applySort': {
+                    const nextSort = message.sort ?? null;
+                    const state = this.getPanelState(panel);
+                    state.sort = nextSort && nextSort.column && nextSort.direction ? nextSort : null;
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'applyFilters': {
+                    const incoming = message.filters ?? {};
+                    const normalized: FilterMap = {};
+                    for (const [key, value] of Object.entries(incoming)) {
+                        if (typeof value === 'string') {
+                            normalized[key] = value;
+                        }
+                    }
+                    const state = this.getPanelState(panel);
+                    state.filters = normalized;
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'applyFilters': {
+                    const incoming = message.filters ?? {};
+                    const normalized: FilterMap = {};
+                    for (const [key, value] of Object.entries(incoming)) {
+                        if (typeof value === 'string') {
+                            normalized[key] = value;
+                        }
+                    }
+                    const state = this.getPanelState(panel);
+                    state.filters = normalized;
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'refresh': {
+                    const state = this.getPanelState(panel);
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, state.page);
+                    break;
+                }
+                case 'saveTablePreferences': {
+                    const prefs = message.prefs ?? {};
+                    await this.saveTablePreferences(panel, schemaName, tableName, prefs);
+                    break;
+                }
+                case 'resetTablePreferences': {
+                    await this.resetTablePreferences(panel, schemaName, tableName);
+                    break;
+                }
             }
-            case 'refresh': {
-                const state = this.getPanelState(panel);
-                await this.loadTableData(panel, connectionId, schemaName, tableName, state.page);
-                break;
-            }
-            case 'saveTablePreferences': {
-                const prefs = (payload as { prefs?: any })?.prefs ?? {};
-                await this.saveTablePreferences(panel, schemaName, tableName, prefs);
-                break;
-            }
-            case 'resetTablePreferences': {
-                await this.resetTablePreferences(panel, schemaName, tableName);
-                break;
-            }
-            default:
-                break;
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            const errorInfo = {
+                message: errorMsg,
+                stack: error instanceof Error ? error.stack : undefined
+            };
+            const webviewError: ExtensionToWebviewMessage = {
+                command: 'webviewError',
+                error: errorInfo
+            };
+            panel.webview.postMessage(webviewError);
         }
     }
 

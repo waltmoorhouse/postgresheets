@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { RowData, QueryResultRow } from './types';
 
 export interface ExportOptions {
     includeHeaders: boolean;
@@ -22,7 +23,7 @@ export class CsvExporter {
      * @param escapeChar The escape character to use (default: ")
      * @returns The escaped value
      */
-    static escapeField(value: any, quoteChar: string = '"', escapeChar: string = '"'): string {
+    static escapeField(value: unknown, quoteChar: string = '"', escapeChar: string = '"'): string {
         // Convert null/undefined to empty string
         if (value === null || value === undefined) {
             return '';
@@ -50,7 +51,7 @@ export class CsvExporter {
      * @returns The CSV formatted row
      */
     static formatRow(
-        row: any[],
+        row: unknown[],
         delimiter: string = ',',
         quoteChar: string = '"',
         escapeChar: string = '"'
@@ -69,7 +70,7 @@ export class CsvExporter {
      */
     static generateCsv(
         columnNames: string[],
-        rows: any[][],
+        rows: unknown[][],
         options: ExportOptions = { includeHeaders: true }
     ): string {
         const {
@@ -105,7 +106,7 @@ export class CsvExporter {
      */
     static async exportToFile(
         columnNames: string[],
-        rows: any[][],
+        rows: unknown[][],
         tableName: string,
         options: ExportOptions = { includeHeaders: true }
     ): Promise<string | null> {

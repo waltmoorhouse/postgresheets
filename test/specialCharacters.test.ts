@@ -4,11 +4,12 @@
  */
 
 import { SqlGenerator } from '../src/sqlGenerator';
+import type { GridChange } from '../src/types';
 
 describe('Special Characters Handling', () => {
     describe('Single Quotes', () => {
         test('handles single quotes in INSERT', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { name: "O'Hara", description: "It's a test" }
             };
@@ -21,7 +22,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles single quotes in UPDATE', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'update',
                 data: { description: "John's car" },
                 where: { id: 1 }
@@ -34,7 +35,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles multiple single quotes in WHERE clause', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'delete',
                 where: { name: "O'Brien's" }
             };
@@ -48,7 +49,7 @@ describe('Special Characters Handling', () => {
 
     describe('Double Quotes', () => {
         test('handles double quotes in text values', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { quote: 'He said "hello"', json_text: '{"key": "value"}' }
             };
@@ -58,7 +59,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('preserves double quotes in JSON strings', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { data: { message: "This has \"nested\" quotes" } }
             };
@@ -72,7 +73,7 @@ describe('Special Characters Handling', () => {
 
     describe('Backticks', () => {
         test('handles backticks in text', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { command: 'Run `npm install` first', note: '`test`' }
             };
@@ -84,7 +85,7 @@ describe('Special Characters Handling', () => {
 
     describe('Mixed Quote Types', () => {
         test('handles all quote types together', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: {
                     text: `O'Hara said "hello" with \`backticks\``,
@@ -100,7 +101,7 @@ describe('Special Characters Handling', () => {
 
     describe('Newlines and Special Characters', () => {
         test('handles newlines in text', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { description: "Line 1\nLine 2\nLine 3" }
             };
@@ -110,7 +111,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles tabs in text', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { data: "Col1\tCol2\tCol3" }
             };
@@ -120,7 +121,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles unicode characters', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { name: "José García", emoji: "🎉✨🚀" }
             };
@@ -132,7 +133,7 @@ describe('Special Characters Handling', () => {
 
     describe('NULL and Empty Values', () => {
         test('handles NULL values correctly', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { name: "John", age: null, active: true }
             };
@@ -146,7 +147,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles empty strings', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { name: "", description: "not empty" }
             };
@@ -156,7 +157,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('distinguishes NULL from empty string', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { field1: null, field2: "" }
             };
@@ -170,7 +171,7 @@ describe('Special Characters Handling', () => {
 
     describe('JSON/JSONB Values', () => {
         test('handles JSON objects', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: {
                     metadata: { key: "value", nested: { arr: [1, 2, 3] } }
@@ -182,7 +183,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles JSON with special characters', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: {
                     config: { message: "O'Brien's \"quote\"", emoji: "🎉" }
@@ -199,7 +200,7 @@ describe('Special Characters Handling', () => {
 
     describe('SQL Injection Prevention', () => {
         test('parameterizes values with SQL-like syntax', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { name: "'; DROP TABLE users; --" }
             };
@@ -212,7 +213,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles WHERE clause with malicious content', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'delete',
                 where: { name: "admin' OR '1'='1" }
             };
@@ -226,7 +227,7 @@ describe('Special Characters Handling', () => {
 
     describe('Backslashes and Escape Sequences', () => {
         test('handles backslashes in text', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { path: "C:\\Users\\John\\Documents", regex: "\\d+\\w*" }
             };
@@ -236,7 +237,7 @@ describe('Special Characters Handling', () => {
         });
 
         test('handles mixed escapes', () => {
-            const change = {
+            const change: GridChange = {
                 type: 'insert',
                 data: { text: "Line 1\\nLine 2\nActual newline" }
             };

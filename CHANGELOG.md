@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Code Quality Improvements
+- **Type Safety Enhancements**: Replaced `any` types in webview communication with discriminated union types (`WebviewToExtensionMessage`, `ExtensionToWebviewMessage`) for compile-time type safety. All message passing between extension and webview is now fully typed.
+- **Error Boundaries**: Implemented `ErrorBoundary.svelte` component to gracefully handle uncaught JavaScript errors and unhandled promise rejections. Users can now recover from errors without restarting the extension.
+- **Improved Type Safety**: 
+  - Updated `sqlGenerator.ts` to use strongly typed `GridChange` union types instead of `any`
+  - Updated `pgUtils.ts` to properly type query result rows as `QueryResultRow`
+  - Updated `csvExporter.ts` to use `unknown` instead of `any` for row data
+  - Added comprehensive types file (`src/types.ts`) for all webview message types and data structures
+
 ### Added
 - **CSV Export with Headers**: Users can now export table data to CSV format with optional column headers. Includes accessible file picker dialog and keyboard navigation. Features:
   - Toggle header inclusion via quick pick

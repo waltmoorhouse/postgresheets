@@ -56,21 +56,29 @@ export class AddConnectionWizard {
         }
 
     // Register a message handler and keep a reference to it for tests
-    const handler = async (message: any) => {
+    const handler = async (message: unknown): Promise<void> => {
       try {
-        switch (message.command) {
+        if (!message || typeof message !== 'object') return;
+        const msg = message as Record<string, unknown>;
+        const command = msg.command;
+        switch (command) {
                     case 'testConnection': {
-                        const payload = message.payload;
+                        const payload = msg.payload as Record<string, unknown>;
                         const result = await this.connectionManager.testConnection(payload);
                         panel.webview.postMessage({ command: 'testResult', payload: result });
                         break;
                     }
                     case 'saveConnection': {
-                        const payload = message.payload;
+                        const payload = msg.payload as Record<string, unknown>;
 
                         let parsed: { host: string; port: number; database: string; username: string; password?: string; ssl?: boolean } | null = null;
                         if (payload.mode === 'connectionString') {
-                            parsed = this.connectionManager.parseConnectionString(payload.connStr);
+                            const connStr = payload.connStr;
+                            if (typeof connStr !== 'string') {
+                                panel.webview.postMessage({ command: 'saveResult', payload: { success: false, error: 'Invalid connection string' } });
+                                break;
+                            }
+                            parsed = this.connectionManager.parseConnectionString(connStr);
                             if (!parsed) {
                                 panel.webview.postMessage({ command: 'saveResult', payload: { success: false, error: 'Invalid connection string' } });
                                 break;
@@ -78,25 +86,26 @@ export class AddConnectionWizard {
                         }
 
                         const config: Partial<ConnectionConfig> = payload.mode === 'connectionString' ? {
-                            name: payload.name,
+                            name: String(payload.name || ''),
                             host: parsed!.host,
                             port: parsed!.port,
                             database: parsed!.database,
                             username: parsed!.username,
                             ssl: parsed!.ssl
                         } : {
-                            name: payload.name,
-                            host: payload.host,
+                            name: String(payload.name || ''),
+                            host: String(payload.host || ''),
                             port: Number(payload.port) || 5432,
-                            database: payload.database,
-                            username: payload.username,
+                            database: String(payload.database || ''),
+                            username: String(payload.username || ''),
                             ssl: Boolean(payload.ssl)
                         };
 
             try {
               // Ensure the config has a name (webview sets payload.name on save).
-              const configWithName = { ...(config as any), name: (payload.name || '').trim() } as Partial<ConnectionConfig> & { name: string };
-              const saved = await this.connectionManager.saveNewConnection(configWithName, payload.password);
+              const configWithName = { ...config, name: (String(payload.name) || '').trim() } as Partial<ConnectionConfig> & { name: string };
+              const password = typeof payload.password === 'string' ? payload.password : undefined;
+              const saved = await this.connectionManager.saveNewConnection(configWithName, password);
                             panel.webview.postMessage({ command: 'saveResult', payload: { success: true, id: saved.id } });
                             panel.dispose();
                             this.refreshTree();
@@ -118,7 +127,7 @@ export class AddConnectionWizard {
   };
 
   // Assign for tests to invoke directly
-  (this as any).lastMessageHandler = handler;
+  (this as Record<string, unknown>).lastMessageHandler = handler;
   const disposable = panel.webview.onDidReceiveMessage(handler);
   // (Removed developer debug logging)
 

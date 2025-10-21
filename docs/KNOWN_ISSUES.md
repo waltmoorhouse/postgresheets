@@ -180,15 +180,15 @@
 
 ### Code Quality
 
-1. **Improve Type Safety in Message Passing**
-   - Current: Some `any` types in webview messages
-   - Goal: Full type safety with discriminated unions
-   - Effort: Medium
+1. **Improve Type Safety in Message Passing** ✅ COMPLETED
+   - **Status:** Implemented
+   - **Changes:** Created discriminated union types for webview messages (`WebviewToExtensionMessage` and `ExtensionToWebviewMessage`) in `src/types.ts`. Added type guards (`isWebviewToExtension()`) to safely validate messages. All webview communication is now fully typed.
+   - **Impact:** Type safety improved from `any` types to discriminated unions. Type errors caught at compile time instead of runtime.
 
-2. **Error Boundaries in Svelte**
-   - Current: JavaScript errors can crash webview
-   - Goal: Graceful error handling with recovery
-   - Effort: Small
+2. **Error Boundaries in Svelte** ✅ COMPLETED
+   - **Status:** Implemented
+   - **Changes:** Created `ErrorBoundary.svelte` component that catches uncaught JavaScript errors and unhandled promise rejections. Component displays graceful error UI with recovery options ("Try Again" and "Reload Page"). Errors are reported to the extension for logging.
+   - **Impact:** Webview no longer crashes on JavaScript errors. Users can recover gracefully instead of needing to restart the extension.
 
 3. **Refactor Connection Management**
    - Current: Map-based caching, no pooling config
@@ -199,6 +199,7 @@
    - Current: ~500KB+ for webview bundles
    - Goal: Code splitting, lazy loading
    - Effort: Medium
+
 
 ### Testing
 
