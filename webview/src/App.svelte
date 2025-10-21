@@ -980,12 +980,9 @@
   sqlPreview = '';
   sqlPreviewIsError = false;
     ensureVscode().postMessage({
-      command: 'previewSql',
-      payload: {
-        changes,
-        primaryKey,
-        bypassValidation
-      }
+      command: 'previewChanges',
+      changes,
+      batchMode: !bypassValidation
     });
   }
 
@@ -1365,19 +1362,19 @@
                       <span class="sort-indicator">{sortIndicator(column)}</span>
                     {/if}
                   </button>
+                  <button
+                    type="button"
+                    class="resize-handle"
+                    tabindex="0"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label={`Resize ${column.name} column. Use arrow keys to adjust width.`}
+                    on:pointerdown={(event) => startResize(column, event)}
+                    on:mousedown={(event) => startResize(column, event)}
+                    on:keydown={(event) => handleResizeKeydown(column, event)}
+                    title="Drag to resize, or use arrow keys (Left/Right to decrease/increase width)"
+                  ></button>
                 </div>
-                <button
-                  type="button"
-                  class="resize-handle"
-                  tabindex="0"
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-label={`Resize ${column.name} column. Use arrow keys to adjust width.`}
-                  on:pointerdown={(event) => startResize(column, event)}
-                  on:mousedown={(event) => startResize(column, event)}
-                  on:keydown={(event) => handleResizeKeydown(column, event)}
-                  title="Drag to resize, or use arrow keys (Left/Right to decrease/increase width)"
-                ></button>
                 <small>{column.type}</small>
               </th>
             {/each}

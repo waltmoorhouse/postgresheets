@@ -24,7 +24,7 @@ test('Preview SQL shows generated SQL when extension responds', async () => {
 
   // Click preview and ensure request was sent
   await fireEvent.click(getByText('Preview SQL'));
-  expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ command: 'previewSql' }));
+  expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ command: 'previewChanges' }));
 
   // Simulate extension success response
   window.dispatchEvent(new MessageEvent('message', { data: { command: 'sqlPreview', payload: 'SELECT 1', error: false } }));

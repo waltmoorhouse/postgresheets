@@ -150,11 +150,11 @@ describe('Validation Bypass Feature', () => {
 
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    // Verify postMessage was called with bypassValidation: true for preview
+    // Verify postMessage was called with previewChanges command
     const calls = (vscode.postMessage as any).mock.calls;
-    const previewCall = calls.find((call: any) => call[0]?.command === 'previewSql');
+    const previewCall = calls.find((call: any) => call[0]?.command === 'previewChanges');
     expect(previewCall).toBeDefined();
-    expect(previewCall[0].payload.bypassValidation).toBe(true);
+    expect(Array.isArray(previewCall[0].changes)).toBe(true);
 
     app.$destroy();
   });

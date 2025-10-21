@@ -120,7 +120,7 @@ export type WebviewToExtensionMessage =
 export type ExtensionToWebviewMessage =
     | { command: 'loadTableState'; data: TableStatePayload }
     | { command: 'loadPageData'; rows: RowData[]; currentPage: number; totalRows: number }
-    | { command: 'previewData'; sqlStatements: string[] }
+    | { command: 'sqlPreview'; payload: string; error?: boolean }
     | { command: 'executionComplete'; success: boolean; error?: string }
     | { command: 'showMessage'; text: string }
     | { command: 'showError'; error: ErrorInfo }
@@ -155,7 +155,7 @@ export function isExtensionToWebview(msg: any): msg is ExtensionToWebviewMessage
     return msg && typeof msg === 'object' && typeof msg.command === 'string' && (
         msg.command === 'loadTableState' ||
         msg.command === 'loadPageData' ||
-        msg.command === 'previewData' ||
+        msg.command === 'sqlPreview' ||
         msg.command === 'executionComplete' ||
         msg.command === 'showMessage' ||
         msg.command === 'showError' ||

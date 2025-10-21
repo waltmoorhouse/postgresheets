@@ -158,6 +158,12 @@ export class SchemaDesigner {
     ): Promise<void> {
         const state = await this.fetchStructure(connectionId, schemaName, tableName);
         if (!state) {
+            if (postMessageOnly) {
+                panel.webview.postMessage({
+                    command: 'executionError',
+                    error: 'Failed to fetch table structure. Check your connection and try again.'
+                });
+            }
             return;
         }
 
