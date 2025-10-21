@@ -12,6 +12,7 @@
     SortDescriptor,
     FilterMap
   } from '$lib/types';
+  import { isIntegerType, isFloatType, sanitizeIntegerInput, sanitizeFloatInput } from '$lib/inputUtils';
 
   export let vscode: VSCodeApi | undefined;
   export let initialState: unknown;
@@ -23,6 +24,8 @@
     selected: boolean;
     isNew: boolean;
     deleted: boolean;
+    // Map of column name -> validation error message (null when valid)
+    validation?: Record<string, string | null>;
   }
 
   interface DraftState {
@@ -138,7 +141,8 @@
       current: deepClone(row.current),
       selected: row.selected,
       isNew: row.isNew,
-      deleted: row.deleted
+      deleted: row.deleted,
+      validation: { ...(row.validation ?? {}) }
     };
   }
 
@@ -182,7 +186,8 @@
         current: draft ? deepClone(draft.current) : deepClone(row),
         selected: false,
         isNew: false,
-        deleted: draft?.deleted ?? false
+        deleted: draft?.deleted ?? false,
+        validation: {}
       };
     });
     if (snapshot?.inserts?.length) {
@@ -417,8 +422,36 @@
         selected: false,
         isNew: true,
         deleted: false
+        ,validation: {}
       }
     ];
+  }
+
+  function validateCellValue(value: unknown, column: ColumnInfo): string | null {
+    if (value === null || value === undefined) return null;
+    // Allow empty strings as null-ish values
+    if (typeof value === 'string' && value.trim().length === 0) return null;
+    const baseType = String(column.type).replace(/\[\]$/, '').toLowerCase();
+    if (baseType === 'json' || baseType === 'jsonb') return null;
+    // Integers
+    if (baseType.includes('int') || baseType === 'bigint' || baseType === 'smallint' || baseType === 'integer') {
+      const s = String(value).trim();
+      if (!/^-?\d+$/.test(s)) return 'Must be an integer';
+      return null;
+    }
+    // Floating / numeric types
+    if (
+      baseType === 'numeric' ||
+      baseType === 'decimal' ||
+      baseType.includes('float') ||
+      baseType === 'real' ||
+      baseType === 'double precision'
+    ) {
+      const s = String(value).trim();
+      if (!/^-?\d+(?:\.\d+)?$/.test(s)) return 'Must be a number';
+      return null;
+    }
+    return null;
   }
 
   function deleteSelected(): void {
@@ -463,11 +496,16 @@
       } else {
         value = rawValue as string;
       }
+      const validationError = validateCellValue(value, column);
       return {
         ...current,
         current: {
           ...current.current,
           [column.name]: value
+        },
+        validation: {
+          ...(current.validation ?? {}),
+          [column.name]: validationError
         }
       };
     });
@@ -484,7 +522,20 @@
 
   function handleTextInput(row: RowState, column: ColumnInfo, event: Event): void {
     const target = event.target as HTMLInputElement | null;
-    updateCell(row, column, target?.value ?? '');
+    let value = target?.value ?? '';
+    if (isIntegerType(column.type)) {
+      const sanitized = sanitizeIntegerInput(value);
+      if (target) target.value = sanitized;
+      updateCell(row, column, sanitized === '' ? null : sanitized);
+      return;
+    }
+    if (isFloatType(column.type)) {
+      const sanitized = sanitizeFloatInput(value);
+      if (target) target.value = sanitized;
+      updateCell(row, column, sanitized === '' ? null : sanitized);
+      return;
+    }
+    updateCell(row, column, value);
   }
 
   function handleEnumSelectChange(row: RowState, column: ColumnInfo, event: Event): void {
@@ -837,6 +888,20 @@
 
   function requestPreview(): void {
     const changes = gatherChanges();
+    // Client-side validation: block preview when validation errors exist.
+    const errors = rows.flatMap((r) =>
+      Object.entries(r.validation ?? {})
+        .filter(([, v]) => v)
+        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
+    );
+    if (errors.length > 0) {
+      executionError = 'Fix validation errors before generating SQL preview.';
+      sqlPreviewOpen = true;
+      sqlPreview = '';
+      previewLoading = false;
+      return;
+    }
+
     previewLoading = true;
     sqlPreviewOpen = true;
     sqlPreview = '';
@@ -861,6 +926,17 @@
 
   function requestExecution(): void {
     const changes = gatherChanges();
+    // Block execution while there are client-side validation errors
+    const errors = rows.flatMap((r) =>
+      Object.entries(r.validation ?? {})
+        .filter(([, v]) => v)
+        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
+    );
+    if (errors.length > 0) {
+      executionError = 'Fix validation errors before executing changes.';
+      executionMessage = '';
+      return;
+    }
     if (changes.length === 0) {
       executionMessage = 'No pending changes to execute.';
       executionError = '';
@@ -972,6 +1048,20 @@
     }
 
     switch (message.command) {
+      case 'sqlPreview':
+        previewLoading = false;
+        sqlPreview = message.payload && typeof message.payload === 'string' ? String(message.payload) : '';
+        sqlPreviewOpen = true;
+        break;
+      case 'loadData':
+        // If the webview requested a refresh that should discard local drafts,
+        // set the reset flag so createDraftSnapshot() returns an empty snapshot.
+        if (discardDraftForNextLoad) {
+          resetDraftState = true;
+          discardDraftForNextLoad = false;
+        }
+        initialise(message.payload as TableStatePayload);
+        break;
       case 'executionComplete':
         executing = false;
         if (message.success) {
@@ -1275,6 +1365,8 @@
                     <div class="cell-edit">
                       <input
                         type="text"
+                        inputmode={isIntegerType(column.type) ? 'numeric' : isFloatType(column.type) ? 'decimal' : undefined}
+                        pattern={isIntegerType(column.type) ? '\\d*' : isFloatType(column.type) ? '[-+]?\\d*(\\.\\d+)?' : undefined}
                         value={formatCellValue(row.current[column.name], column)}
                         disabled={row.deleted}
                         on:input={(event) => handleTextInput(row, column, event)}

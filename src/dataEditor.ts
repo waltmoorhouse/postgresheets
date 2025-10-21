@@ -410,7 +410,9 @@ export class DataEditor {
                 tableName,
                 columns,
                 primaryKey,
-                rows: dataResult.rows,
+                // Return normalized rows (JSON/arrays/enums converted) so the
+                // webview always receives JS-native types rather than raw driver values.
+                rows: normalizedRows,
                 currentPage: state.page,
                 totalRows,
                 paginationSize: this.paginationSize,
@@ -592,15 +594,18 @@ export class DataEditor {
             return;
         }
 
-        const statements = changes.map(change => {
-            const sql = SqlGenerator.generateSql(schemaName, tableName, change);
-            return SqlGenerator.formatSqlWithValues(sql.query, sql.values);
-        });
+        let payload: string;
+        try {
+            const statements = changes.map(change => {
+                const sql = SqlGenerator.generateSql(schemaName, tableName, change);
+                return SqlGenerator.formatSqlWithValues(sql.query, sql.values);
+            });
+            payload = statements.join(';\n\n');
+        } catch (err) {
+            payload = `/* Failed to generate SQL: ${err instanceof Error ? err.message : String(err)} */`;
+        }
 
-        panel.webview.postMessage({
-            command: 'sqlPreview',
-            payload: statements.join(';\n\n')
-        });
+        panel.webview.postMessage({ command: 'sqlPreview', payload });
     }
 
     private buildWebviewHtml(webview: vscode.Webview, state: TableStatePayload): string {

@@ -409,6 +409,11 @@ tr.deleted {
   min-width: 0;
 }
 
+input.cell-input.invalid {
+  border-color: var(--ps-danger-border);
+  box-shadow: 0 0 0 1px var(--ps-danger-border);
+}
+
 .ps-btn--icon.text-expand-button {
   border-color: var(--ps-border);
 }
