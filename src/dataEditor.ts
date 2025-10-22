@@ -313,10 +313,9 @@ export class DataEditor {
             );
             const indexedColumns = new Set(indexResult.rows.map(row => row.attname));
 
-            // Fetch foreign key information
-            // Using a simpler, more reliable query that doesn't rely on array operations
+            // Fetch foreign key information using a simpler, more reliable query
             const fkResult = await client.query(
-                `SELECT
+                `SELECT DISTINCT ON (c.oid, a.attnum)
                     a.attname as column_name,
                     t2.relname as referenced_table,
                     n2.nspname as referenced_schema,
@@ -325,19 +324,12 @@ export class DataEditor {
                  JOIN pg_class t ON t.oid = c.conrelid
                  JOIN pg_namespace n ON n.oid = t.relnamespace
                  JOIN pg_class t2 ON t2.oid = c.confrelid
-                 JOIN pg_namespace n2 ON n2.oid = t2.relnamespace,
-                 LATERAL (SELECT unnest(c.conkey) as conkey_val) fk,
-                 LATERAL (SELECT unnest(c.confkey) as confkey_val) rf,
-                 pg_attribute a,
-                 pg_attribute a2
+                 JOIN pg_namespace n2 ON n2.oid = t2.relnamespace
+                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+                 JOIN pg_attribute a2 ON a2.attrelid = t2.oid AND a2.attnum = ANY(c.confkey)
                  WHERE t.relname = $1 
                    AND n.nspname = $2 
-                   AND c.contype = 'f'
-                   AND a.attrelid = c.conrelid 
-                   AND a.attnum = fk.conkey_val
-                   AND a2.attrelid = c.confrelid
-                   AND a2.attnum = rf.confkey_val
-                   AND fk.conkey_val = rf.confkey_val`,
+                   AND c.contype = 'f'`,
                 [tableName, schemaName || 'public']
             );
             console.log(`[DataEditor] FK query returned ${fkResult.rows.length} rows for ${schemaName}.${tableName}`);

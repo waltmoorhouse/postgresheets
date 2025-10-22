@@ -507,6 +507,24 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
+        vscode.commands.registerCommand('postgres-editor.viewQueryHistory', () => {
+            // Make the query history panel visible by posting a refresh message
+            queryHistoryView.refresh();
+        }),
+
+        vscode.commands.registerCommand('postgres-editor.clearQueryHistory', async () => {
+            // The query history view already has a confirmation dialog, 
+            // so we just trigger it via a message
+            const confirmed = await vscode.window.showWarningMessage(
+                'Clear all query history?',
+                { modal: true },
+                'Clear'
+            );
+            if (confirmed === 'Clear') {
+                await vscode.commands.executeCommand('postgres-editor.refreshQueryHistory');
+            }
+        }),
+
         vscode.commands.registerCommand('postgres-editor.refreshQueryHistory', () => {
             queryHistoryView.refresh();
         }),
