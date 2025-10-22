@@ -590,12 +590,11 @@ export class DataEditor {
                     break;
                 }
                 case 'copyToSqlTerminal': {
-                    // Copy SQL to terminal without executing
+                    // Copy SQL to clipboard
                     const sql = typeof message.sql === 'string' ? message.sql : '';
                     if (sql) {
-                        const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('SQL Terminal');
-                        terminal.sendText(sql, false);
-                        terminal.show(true);
+                        await vscode.env.clipboard.writeText(sql);
+                        vscode.window.showInformationMessage('SQL copied to clipboard');
                     }
                     break;
                 }

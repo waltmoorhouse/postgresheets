@@ -111,7 +111,7 @@ export class CsvImportWizard {
 				vscode.Uri.joinPath(this.context.extensionUri, 'media', 'csv-import', 'main.js')
 			);
 			const styleUri = panel.webview.asWebviewUri(
-				vscode.Uri.joinPath(this.context.extensionUri, 'media', 'index.css')
+				vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css')
 			);
 
 			panel.webview.html = `<!doctype html>

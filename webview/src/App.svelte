@@ -1885,9 +1885,9 @@
               class="ps-btn ps-btn--ghost"
               on:click={copyToSqlTerminal}
               disabled={executing || previewLoading || !sqlPreview}
-              title="Copy SQL to terminal without executing"
+              title="Copy SQL to clipboard"
             >
-              📋 Copy to Terminal
+              📋 Copy to Clipboard
             </button>
             <button
               type="button"

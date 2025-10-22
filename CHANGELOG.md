@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- **Fixed Missing CSS in Wizards**: Updated CSV Import and Add Connection wizards to reference the correct `app.css` file instead of non-existent `index.css`. This fixes styling issues where the wizards had no styles applied.
+- **Copy to Clipboard**: Changed "Copy to Terminal" button to "Copy to Clipboard" for better UX. SQL is now copied to the clipboard instead of being sent to a terminal, allowing users to manually paste it where needed.
+
 ### Code Quality Improvements
 - **Type Safety Enhancements**: Replaced `any` types in webview communication with discriminated union types (`WebviewToExtensionMessage`, `ExtensionToWebviewMessage`) for compile-time type safety. All message passing between extension and webview is now fully typed.
 - **Error Boundaries**: Implemented `ErrorBoundary.svelte` component to gracefully handle uncaught JavaScript errors and unhandled promise rejections. Users can now recover from errors without restarting the extension.

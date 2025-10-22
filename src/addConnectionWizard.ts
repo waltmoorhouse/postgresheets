@@ -31,7 +31,7 @@ export class AddConnectionWizard {
         // Try to load the built Svelte bundle from the extension's media
         try {
             const scriptUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'add-connection', 'main.js'));
-            const styleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'index.css'));
+            const styleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css'));
             panel.webview.html = `<!doctype html>
 <html>
 <head>
