@@ -28,7 +28,7 @@ export class SqlGenerator {
         const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
         
         const columnList = columns.map(c => quoteIdentifier(c)).join(', ');
-        const query = `INSERT INTO ${tableName}\n  (${columnList})\nVALUES\n  (${placeholders})`;
+        const query = `INSERT INTO ${tableName} (${columnList}) VALUES (${placeholders})`;
         
         return { query, values };
     }
@@ -42,13 +42,13 @@ export class SqlGenerator {
         
         const setClause = dataColumns
             .map((col, i) => `${quoteIdentifier(col)} = $${i + 1}`)
-            .join(',\n  ');
+            .join(', ');
         
         const whereClause = whereColumns
             .map((col, i) => `${quoteIdentifier(col)} = $${dataValues.length + i + 1}`)
-            .join('\n  AND ');
+            .join(' AND ');
         
-        const query = `UPDATE ${tableName}\nSET\n  ${setClause}\nWHERE\n  ${whereClause}`;
+        const query = `UPDATE ${tableName} SET ${setClause} WHERE ${whereClause}`;
         const values = [...dataValues, ...whereValues];
         
         return { query, values };
@@ -60,9 +60,9 @@ export class SqlGenerator {
         
         const whereClause = whereColumns
             .map((col, i) => `${quoteIdentifier(col)} = $${i + 1}`)
-            .join('\n  AND ');
+            .join(' AND ');
         
-        const query = `DELETE FROM ${tableName}\nWHERE\n  ${whereClause}`;
+        const query = `DELETE FROM ${tableName} WHERE ${whereClause}`;
         
         return { query, values: whereValues };
     }

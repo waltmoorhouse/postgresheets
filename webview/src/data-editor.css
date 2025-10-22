@@ -679,6 +679,50 @@ textarea.invalid {
   width: min(900px, 95vw);
 }
 
+/* Modal dialog structure (for .modal.dialog containers) */
+.modal.dialog {
+  width: min(720px, 90vw);
+  background: var(--ps-surface-elevated);
+  border-radius: var(--ps-radius-lg);
+  border: 1px solid var(--ps-border-strong);
+  padding: var(--ps-spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ps-spacing-md);
+  box-shadow: var(--ps-shadow-soft);
+  animation: scale-in 160ms ease forwards;
+}
+
+.modal.dialog.preview-modal {
+  width: min(900px, 95vw);
+}
+
+.modal-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--ps-text-primary);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ps-spacing-md);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ps-spacing-sm);
+}
+
 .preview-status {
   margin: 0;
   color: var(--ps-text-secondary);

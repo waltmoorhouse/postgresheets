@@ -20,15 +20,14 @@
   }
 
   function emitChange() {
-    // Changes are only committed when Save is clicked, not during preview
-    // This ensures Cancel reverts all changes (both visibility and reordering)
+    dispatch('change', { items: localItems.slice() });
   }
 
   function toggle(name: string) {
     const idx = localItems.findIndex(i => i.name === name);
     if (idx >= 0) {
       localItems[idx].visible = !localItems[idx].visible;
-      // Don't emit - wait for Save
+      emitChange();
     }
   }
 
@@ -39,6 +38,7 @@
     copy[idx - 1] = copy[idx];
     copy[idx] = tmp;
     localItems = copy;
+    emitChange();
     announcement = `${localItems[idx - 1].name} moved up`;
   }
 
@@ -49,6 +49,7 @@
     copy[idx + 1] = copy[idx];
     copy[idx] = tmp;
     localItems = copy;
+    emitChange();
     announcement = `${localItems[idx + 1].name} moved down`;
   }
 
@@ -101,6 +102,7 @@
     const [moved] = copy.splice(from, 1);
     copy.splice(to, 0, moved);
     localItems = copy;
+    emitChange();
     // announce the move
     announcement = `${moved.name} moved to position ${to + 1}`;
     dragIndex = null;

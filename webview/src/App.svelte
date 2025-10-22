@@ -485,7 +485,6 @@
       baseline[column.name] = null;
     });
     rows = [
-      ...rows,
       {
         id: Date.now(),
         original: deepClone(baseline),
@@ -494,7 +493,8 @@
         isNew: true,
         deleted: false
         ,validation: {}
-      }
+      },
+      ...rows
     ];
   }
 
@@ -509,7 +509,6 @@
       }
     });
     rows = [
-      ...rows,
       {
         id: Date.now(),
         original: deepClone(baseline),
@@ -518,7 +517,8 @@
         isNew: true,
         deleted: false
         ,validation: {}
-      }
+      },
+      ...rows
     ];
   }
 
@@ -916,13 +916,16 @@
   }
 
   function handleResizeKeydown(column: ColumnInfo, event: KeyboardEvent): void {
+    // Arrow keys for accessibility: Up/Right = increase width, Down/Left = decrease width
     if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
       event.preventDefault();
       const currentWidth = columnWidths[column.name] || 100;
       const newWidth = Math.max(60, currentWidth - 10);
       setColumnWidth(column.name, newWidth);
       resizingColumnKeyboard = column.name;
-      ariaLiveMessage = `${column.name} column width reduced to ${newWidth} pixels`;
+      ariaLiveMessage = `${column.name} column width decreased to ${newWidth} pixels`;
+      // Persist immediately for better user feedback
+      setTimeout(() => persistColumnWidths(), 100);
     } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
       event.preventDefault();
       const currentWidth = columnWidths[column.name] || 100;
@@ -930,6 +933,8 @@
       setColumnWidth(column.name, newWidth);
       resizingColumnKeyboard = column.name;
       ariaLiveMessage = `${column.name} column width increased to ${newWidth} pixels`;
+      // Persist immediately for better user feedback
+      setTimeout(() => persistColumnWidths(), 100);
     } else if (event.key === 'Enter' || event.key === 'Escape') {
       event.preventDefault();
       resizingColumnKeyboard = null;
@@ -1359,11 +1364,6 @@
           <span>Bypass validation</span>
         </label>
         <button type="button" class="ps-btn ps-btn--primary" on:click={addRow}>Add row</button>
-        {#if primaryKey.length > 0 && columns.some((c) => primaryKey.includes(c.name) && c.type.toLowerCase() === 'uuid')}
-          <button type="button" class="ps-btn ps-btn--primary" on:click={addRowWithUUID} title="Add a new row with auto-generated UUID primary key">
-            Add row (UUID)
-          </button>
-        {/if}
         <button
           type="button"
           class="ps-btn ps-btn--ghost"
@@ -1403,6 +1403,7 @@
             <h2 id="column-manager-heading" class="sr-only">Manage Columns</h2>
             <ColumnManager
               items={columns.map((c) => ({ name: c.name, type: c.type, visible: !hiddenColumnsSet.has(c.name) }))}
+              on:change={handleColumnManagerChange}
               on:save={handleColumnManagerSave}
               on:reset={() => resetPreferences()}
               on:cancel={() => columnManagerOpen = false}
@@ -1644,6 +1645,7 @@
                   </td>
                 {:else}
                     {@const err = row.validation?.[column.name]}
+                    {@const isUuidPk = primaryKey.includes(column.name) && column.type.toLowerCase() === 'uuid'}
                   <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
                     <div class="cell-edit">
                       <input
@@ -1657,6 +1659,20 @@
                         aria-invalid={err ? 'true' : 'false'}
                         aria-describedby={err ? errorId(row.id, column.name) : undefined}
                       >
+                      {#if isUuidPk && row.isNew}
+                        <button
+                          type="button"
+                          class="ps-btn ps-btn--icon text-expand-button"
+                          disabled={row.deleted}
+                          on:click={() => {
+                            const uuid = generateUUID();
+                            updateCell(row, column, uuid);
+                          }}
+                          title="Generate random UUID"
+                        >
+                          🎲
+                        </button>
+                      {/if}
                       <button
                         type="button"
                         class="ps-btn ps-btn--icon text-expand-button"

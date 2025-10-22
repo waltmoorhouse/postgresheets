@@ -682,7 +682,8 @@ export class DataEditor {
         try {
             const statements = changes.map(change => {
                 const sql = SqlGenerator.generateSql(schemaName, tableName, change);
-                return SqlGenerator.formatSqlWithValues(sql.query, sql.values);
+                const formatted = this.formatSqlForDisplay(sql.query);
+                return SqlGenerator.formatSqlWithValues(formatted, sql.values);
             });
             payload = statements.join(';\n\n');
         } catch (err) {
@@ -691,6 +692,46 @@ export class DataEditor {
 
     const isError = typeof payload === 'string' && payload.startsWith('/* Failed to generate SQL');
     panel.webview.postMessage({ command: 'sqlPreview', payload, error: isError });
+    }
+
+    private formatSqlForDisplay(query: string): string {
+        // Format SQL with proper indentation for readability in preview
+        // INSERT INTO ... (\n  ...\n) VALUES (\n  ...\n)
+        // UPDATE ... SET\n  ...\nWHERE\n  ...
+        // DELETE FROM ... WHERE\n  ...
+        
+        let formatted = query;
+        
+        // Format INSERT
+        formatted = formatted.replace(
+            /INSERT INTO (\S+) \(([^)]+)\) VALUES \(([^)]+)\)/i,
+            (match, table, cols, vals) => {
+                return `INSERT INTO ${table}\n  (${cols})\nVALUES\n  (${vals})`;
+            }
+        );
+        
+        // Format UPDATE with SET and WHERE
+        formatted = formatted.replace(
+            /UPDATE (\S+) SET (.+) WHERE (.+)/i,
+            (match, table, setClauses, whereClause) => {
+                // Split SET clauses by comma
+                const sets = setClauses.split(',').map((s: string) => s.trim()).join(',\n  ');
+                // Split WHERE clauses by AND
+                const wheres = whereClause.split(' AND ').map((w: string) => w.trim()).join('\n  AND ');
+                return `UPDATE ${table}\nSET\n  ${sets}\nWHERE\n  ${wheres}`;
+            }
+        );
+        
+        // Format DELETE with WHERE
+        formatted = formatted.replace(
+            /DELETE FROM (\S+) WHERE (.+)/i,
+            (match, table, whereClause) => {
+                const wheres = whereClause.split(' AND ').map((w: string) => w.trim()).join('\n  AND ');
+                return `DELETE FROM ${table}\nWHERE\n  ${wheres}`;
+            }
+        );
+        
+        return formatted;
     }
 
     private buildWebviewHtml(webview: vscode.Webview, state: TableStatePayload): string {
