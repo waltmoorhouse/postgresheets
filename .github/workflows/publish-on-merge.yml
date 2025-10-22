@@ -94,6 +94,8 @@ jobs:
       - name: Create GitHub Release for new tag
         id: create_release
         uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.bump-semver.outputs.new_version }}
           release_name: ${{ steps.bump-semver.outputs.new_version }}
@@ -104,6 +106,8 @@ jobs:
       - name: Upload VSIX to GitHub Release
         if: steps.find_vsix.outputs.vsix_found == 'true'
         uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ steps.find_vsix.outputs.vsix_path }}
