@@ -1,5 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import ColumnManager from './ColumnManager.svelte';
+  import HiddenColumnsModal from './HiddenColumnsModal.svelte';
+  import FKSelectorModal from './FKSelectorModal.svelte';
+  import DateTimeModal from './DateTimeModal.svelte';
+  import FocusTrap from '$lib/components/FocusTrap.svelte';
   import { clsx } from 'clsx';
   import type {
     VSCodeApi,
@@ -10,6 +15,7 @@
     SortDescriptor,
     FilterMap
   } from '$lib/types';
+  import { isIntegerType, isFloatType, sanitizeIntegerInput, sanitizeFloatInput } from '$lib/inputUtils';
 
   export let vscode: VSCodeApi | undefined;
   export let initialState: unknown;
@@ -21,6 +27,8 @@
     selected: boolean;
     isNew: boolean;
     deleted: boolean;
+    // Map of column name -> validation error message (null when valid)
+    validation?: Record<string, string | null>;
   }
 
   interface DraftState {
@@ -45,10 +53,10 @@
   let currentPage = 0;
   let totalRows = 0;
   let paginationSize = 100;
-  let batchMode = true;
   let searchTerm = '';
   let sqlPreview = '';
   let sqlPreviewOpen = false;
+  let sqlPreviewIsError = false;
   let previewLoading = false;
   let executionMessage = '';
   let executionError = '';
@@ -60,6 +68,24 @@
   let columnWidths: Record<string, number> = {};
   let resetDraftState = false;
   let discardDraftForNextLoad = false;
+  let bypassValidation = false;
+
+  $: hasValidationErrors = rows.some(r => {
+    if (!r || !r.validation) return false;
+    return Object.values(r.validation).some(v => v !== null && v !== undefined);
+  });
+
+  // Column preferences / manager
+  let hiddenColumnsSet: Set<string> = new Set();
+  let visibleColumns: ColumnInfo[] = [];
+  let columnManagerOpen = false;
+  let masterColumnsMap: Map<string, ColumnInfo> = new Map();
+  // Drag-and-drop state for reordering in the column manager is handled by
+  // the ColumnManager component; App.svelte only coordinates opening and
+  // persisting preferences.
+
+  // Hidden columns modal
+  let hiddenModalOpen = false;
 
   const persistedState: PersistedState | undefined =
     vscode && typeof vscode.getState === 'function'
@@ -99,6 +125,9 @@
   let resizeStartWidth = 0;
   let activeResizePointerId: number | null = null;
   let activeResizeHandle: HTMLElement | null = null;
+  let resizingColumnKeyboard: string | null = null;
+  let ariaLiveMessage = '';
+  let selectionRangeStart: number | null = null;
 
   // JSON modal state
   let jsonEditorOpen = false;
@@ -106,12 +135,26 @@
   let jsonEditorColumn: ColumnInfo | null = null;
   let jsonDraft = '';
   let jsonError = '';
+  let jsonTextarea: HTMLTextAreaElement | null = null;
 
   // Text modal state
   let textEditorOpen = false;
   let textEditorRow: RowState | null = null;
   let textEditorColumn: ColumnInfo | null = null;
   let textDraft = '';
+  let textTextarea: HTMLTextAreaElement | null = null;
+
+  // Foreign key selector modal state
+  let fkSelectorOpen = false;
+  let fkSelectorRow: RowState | null = null;
+  let fkSelectorColumn: ColumnInfo | null = null;
+  let currentConnectionId = '';
+
+  // DateTime modal state
+  let dateTimeModalOpen = false;
+  let dateTimeRow: RowState | null = null;
+  let dateTimeColumn: ColumnInfo | null = null;
+  let dateTimeValue: string = '';
 
   function deepClone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
@@ -124,7 +167,8 @@
       current: deepClone(row.current),
       selected: row.selected,
       isNew: row.isNew,
-      deleted: row.deleted
+      deleted: row.deleted,
+      validation: { ...(row.validation ?? {}) }
     };
   }
 
@@ -153,20 +197,30 @@
 
     schemaName = payload.schemaName;
     tableName = payload.tableName;
-    columns = payload.columns ?? [];
+  columns = payload.columns ?? [];
+  // maintain a master map of column metadata so reorders can reconstruct ColumnInfo
+  masterColumnsMap = new Map(columns.map((c) => [c.name, c]));
     primaryKey = normalizePrimaryKey(payload.primaryKey);
     const rawRows = payload.rows ?? [];
     rows = rawRows.map((row, index) => {
       const original = deepClone(row);
       const key = buildRowKey(original);
       const draft = updateSnapshot[key];
+      const current = draft ? deepClone(draft.current) : deepClone(row);
+      // Compute initial validation for each column so any invalid values
+      // received from the server are surfaced client-side immediately.
+      const validation: Record<string, string | null> = {};
+      for (const col of columns) {
+        validation[col.name] = validateCellValue(current[col.name], col);
+      }
       return {
         id: index + 1,
         original,
-        current: draft ? deepClone(draft.current) : deepClone(row),
+        current,
         selected: false,
         isNew: false,
-        deleted: draft?.deleted ?? false
+        deleted: draft?.deleted ?? false,
+        validation
       };
     });
     if (snapshot?.inserts?.length) {
@@ -178,7 +232,6 @@
     currentPage = payload.currentPage ?? 0;
     totalRows = payload.totalRows ?? rawRows.length;
     paginationSize = payload.paginationSize ?? 100;
-    batchMode = payload.batchMode ?? true;
     searchTerm = '';
     sqlPreview = '';
     sqlPreviewOpen = false;
@@ -205,6 +258,35 @@
     jsonEditorColumn = null;
     jsonDraft = '';
     jsonError = '';
+    // Apply persisted table preferences (if any)
+    const prefs = (payload as TableStatePayload).tablePreferences ?? {};
+    if (prefs.columnOrder && Array.isArray(prefs.columnOrder) && prefs.columnOrder.length > 0) {
+      // Reorder columns according to stored order while keeping unknown columns appended
+      const order = prefs.columnOrder;
+      const byName = new Map(columns.map((c) => [c.name, c]));
+      const ordered: ColumnInfo[] = [];
+      for (const name of order) {
+        const col = byName.get(name);
+        if (col) {
+          ordered.push(col);
+          byName.delete(name);
+        }
+      }
+      // append any remaining columns not present in stored order
+      for (const col of columns) {
+        if (byName.has(col.name)) {
+          ordered.push(col);
+        }
+      }
+      columns = ordered;
+    }
+    if (prefs.hiddenColumns && Array.isArray(prefs.hiddenColumns)) {
+      hiddenColumnsSet = new Set(prefs.hiddenColumns);
+    } else {
+      hiddenColumnsSet = new Set();
+    }
+  // Build visibleColumns
+  visibleColumns = columns.filter((c) => !hiddenColumnsSet.has(c.name));
   }
 
   if (initialState && typeof initialState === 'object') {
@@ -255,11 +337,25 @@
     return raw;
   }
 
+  function errorId(rowId: number, columnName: string): string {
+    // Produce a DOM-safe id by replacing non-alphanum chars
+    const safe = String(columnName).replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `cell-error-${rowId}-${safe}`;
+  }
+
   function formatCellValue(value: unknown, column: ColumnInfo): string {
     if (value === null || value === undefined) {
       return '';
     }
     if (column.type === 'json' || column.type === 'jsonb') {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }
+    // Array types: prefer JSON string representation for clarity
+    if (String(column.type).endsWith('[]')) {
       try {
         return JSON.stringify(value);
       } catch {
@@ -333,8 +429,35 @@
     });
     if (!checked) {
       selectAll = false;
+      selectionRangeStart = null;
     } else {
       selectAll = rows.every((current) => current.deleted || current.selected);
+      selectionRangeStart = row.id;
+      ariaLiveMessage = `Row ${row.id} selected`;
+    }
+  }
+
+  function handleRowCheckboxClick(row: RowState, event: MouseEvent): void {
+    if (event.shiftKey && selectionRangeStart !== null) {
+      // Range selection with Shift+Click
+      event.preventDefault();
+      const startIdx = rows.findIndex(r => r.id === selectionRangeStart);
+      const endIdx = rows.findIndex(r => r.id === row.id);
+      
+      if (startIdx !== -1 && endIdx !== -1) {
+        const [min, max] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+        const selectedCount = max - min + 1;
+        
+        rows = rows.map((r, idx) => {
+          if (idx >= min && idx <= max && !r.deleted) {
+            return { ...r, selected: true };
+          }
+          return r;
+        });
+        
+        selectAll = rows.every((current) => current.deleted || current.selected);
+        ariaLiveMessage = `Selected ${selectedCount} rows from row ${Math.min(selectionRangeStart, row.id)} to row ${Math.max(selectionRangeStart, row.id)}`;
+      }
     }
   }
 
@@ -350,13 +473,25 @@
     });
   }
 
+  function generateUUID(): string {
+    // Generate a random UUID v4
+    // https://developer.mozilla.org/en-US/docs/Web/API/crypto/getRandomValues
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    // Set version to 4 (random)
+    array[6] = (array[6] & 0x0f) | 0x40;
+    // Set variant to RFC 4122
+    array[8] = (array[8] & 0x3f) | 0x80;
+    const hex = Array.from(array).map((x) => x.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
   function addRow(): void {
     const baseline: Record<string, unknown> = {};
     columns.forEach((column) => {
       baseline[column.name] = null;
     });
     rows = [
-      ...rows,
       {
         id: Date.now(),
         original: deepClone(baseline),
@@ -364,8 +499,83 @@
         selected: false,
         isNew: true,
         deleted: false
-      }
+        ,validation: {}
+      },
+      ...rows
     ];
+  }
+
+  function addRowWithUUID(): void {
+    const baseline: Record<string, unknown> = {};
+    columns.forEach((column) => {
+      // Fill UUID primary key columns with generated UUIDs
+      if (primaryKey.includes(column.name) && column.type.toLowerCase() === 'uuid') {
+        baseline[column.name] = generateUUID();
+      } else {
+        baseline[column.name] = null;
+      }
+    });
+    rows = [
+      {
+        id: Date.now(),
+        original: deepClone(baseline),
+        current: deepClone(baseline),
+        selected: false,
+        isNew: true,
+        deleted: false
+        ,validation: {}
+      },
+      ...rows
+    ];
+  }
+
+  function validateCellValue(value: unknown, column: ColumnInfo): string | null {
+    if (value === null || value === undefined) return null;
+    // Allow empty strings as null-ish values
+    if (typeof value === 'string' && value.trim().length === 0) return null;
+    const baseType = String(column.type).replace(/\[\]$/, '').toLowerCase();
+    
+    // UUID validation
+    if (baseType === 'uuid') {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (typeof value === 'string' && !uuidRegex.test(value)) {
+        return 'Invalid UUID format (expected: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)';
+      }
+      return null;
+    }
+    
+    // JSON/JSONB validation
+    if (baseType === 'json' || baseType === 'jsonb') {
+      if (typeof value === 'string') {
+        try {
+          JSON.parse(value);
+          return null;
+        } catch {
+          return 'Invalid JSON';
+        }
+      }
+      return null;
+    }
+    
+    // Integers
+    if (baseType.includes('int') || baseType === 'bigint' || baseType === 'smallint' || baseType === 'integer') {
+      const s = String(value).trim();
+      if (!/^-?\d+$/.test(s)) return 'Must be an integer';
+      return null;
+    }
+    // Floating / numeric types
+    if (
+      baseType === 'numeric' ||
+      baseType === 'decimal' ||
+      baseType.includes('float') ||
+      baseType === 'real' ||
+      baseType === 'double precision'
+    ) {
+      const s = String(value).trim();
+      if (!/^-?\d+(?:\.\d+)?$/.test(s)) return 'Must be a number';
+      return null;
+    }
+    return null;
   }
 
   function deleteSelected(): void {
@@ -410,11 +620,16 @@
       } else {
         value = rawValue as string;
       }
+      const validationError = validateCellValue(value, column);
       return {
         ...current,
         current: {
           ...current.current,
           [column.name]: value
+        },
+        validation: {
+          ...(current.validation ?? {}),
+          [column.name]: validationError
         }
       };
     });
@@ -431,7 +646,26 @@
 
   function handleTextInput(row: RowState, column: ColumnInfo, event: Event): void {
     const target = event.target as HTMLInputElement | null;
-    updateCell(row, column, target?.value ?? '');
+    let value = target?.value ?? '';
+    if (isIntegerType(column.type)) {
+      const sanitized = sanitizeIntegerInput(value);
+      if (target) target.value = sanitized;
+      updateCell(row, column, sanitized === '' ? null : sanitized);
+      return;
+    }
+    if (isFloatType(column.type)) {
+      const sanitized = sanitizeFloatInput(value);
+      if (target) target.value = sanitized;
+      updateCell(row, column, sanitized === '' ? null : sanitized);
+      return;
+    }
+    updateCell(row, column, value);
+  }
+
+  function handleEnumSelectChange(row: RowState, column: ColumnInfo, event: Event): void {
+    const target = event.target as HTMLSelectElement | null;
+    const value = target ? target.value : '';
+    updateCell(row, column, value === '' ? null : value);
   }
 
   function openJsonEditor(row: RowState, column: ColumnInfo): void {
@@ -440,6 +674,13 @@
     jsonEditorColumn = column;
     jsonDraft = formatCellValue(jsonEditorRow.current[column.name], column);
     jsonError = '';
+    // Focus the textarea on the next tick (after DOM update)
+    setTimeout(() => {
+      if (jsonTextarea) {
+        jsonTextarea.focus();
+        jsonTextarea.select();
+      }
+    }, 0);
   }
 
   function closeJsonEditor(): void {
@@ -448,6 +689,7 @@
     jsonEditorColumn = null;
     jsonDraft = '';
     jsonError = '';
+    jsonTextarea = null;
   }
 
   function openTextEditor(row: RowState, column: ColumnInfo): void {
@@ -455,6 +697,13 @@
     textEditorRow = rows.find((current) => current.id === row.id) ?? row;
     textEditorColumn = column;
     textDraft = formatCellValue(textEditorRow.current[column.name], column);
+    // Focus the textarea on the next tick (after DOM update)
+    setTimeout(() => {
+      if (textTextarea) {
+        textTextarea.focus();
+        textTextarea.select();
+      }
+    }, 0);
   }
 
   function closeTextEditor(): void {
@@ -462,6 +711,7 @@
     textEditorRow = null;
     textEditorColumn = null;
     textDraft = '';
+    textTextarea = null;
   }
 
   function saveTextDraft(): void {
@@ -483,6 +733,14 @@
     });
     rows = updatedRows;
     closeTextEditor();
+  }
+
+  function editorLabel(column: ColumnInfo | null): string {
+    if (!column) return '';
+    if (column.type === 'json') return 'JSON';
+    if (column.type === 'jsonb') return 'JSONB';
+    if (String(column.type).endsWith('[]')) return 'Array';
+    return 'JSON';
   }
 
   function saveJsonDraft(): void {
@@ -508,7 +766,8 @@
       return;
     }
     try {
-      const parsedValue = type === 'json' || type === 'jsonb' ? JSON.parse(jsonDraft) : jsonDraft;
+      const shouldParse = type === 'json' || type === 'jsonb' || String(type).endsWith('[]');
+      const parsedValue = shouldParse ? JSON.parse(jsonDraft) : jsonDraft;
       const updatedRows = rows.map((row) => {
         if (row.id !== jsonEditorRow?.id) {
           return row;
@@ -529,6 +788,82 @@
     }
   }
 
+  function openFKSelector(row: RowState, column: ColumnInfo): void {
+    if (!column.foreignKey) {
+      return;
+    }
+    fkSelectorOpen = true;
+    fkSelectorRow = rows.find((current) => current.id === row.id) ?? row;
+    fkSelectorColumn = column;
+  }
+
+  function closeFKSelector(): void {
+    fkSelectorOpen = false;
+    fkSelectorRow = null;
+    fkSelectorColumn = null;
+  }
+
+  function handleFKSelected(event: CustomEvent<{ value: unknown }>): void {
+    if (!fkSelectorRow || !fkSelectorColumn) {
+      return;
+    }
+    const { name } = fkSelectorColumn;
+    const { value } = event.detail;
+    const updatedRows = rows.map((row) => {
+      if (row.id !== fkSelectorRow?.id) {
+        return row;
+      }
+      return {
+        ...row,
+        current: {
+          ...row.current,
+          [name]: value
+        }
+      };
+    });
+    rows = updatedRows;
+    closeFKSelector();
+  }
+
+  function openDateTimeModal(row: RowState, column: ColumnInfo): void {
+    const isTimestampType = column.type && /timestamp|date|time/i.test(column.type);
+    if (!isTimestampType) {
+      return;
+    }
+    dateTimeModalOpen = true;
+    dateTimeRow = rows.find((current) => current.id === row.id) ?? row;
+    dateTimeColumn = column;
+    dateTimeValue = String(row.current[column.name] ?? '');
+  }
+
+  function closeDateTimeModal(): void {
+    dateTimeModalOpen = false;
+    dateTimeRow = null;
+    dateTimeColumn = null;
+    dateTimeValue = '';
+  }
+
+  function handleDateTimeSaved(value: string): void {
+    if (!dateTimeRow || !dateTimeColumn) {
+      return;
+    }
+    const { name } = dateTimeColumn;
+    const updatedRows = rows.map((row) => {
+      if (row.id !== dateTimeRow?.id) {
+        return row;
+      }
+      return {
+        ...row,
+        current: {
+          ...row.current,
+          [name]: value || null
+        }
+      };
+    });
+    rows = updatedRows;
+    closeDateTimeModal();
+  }
+
   function toggleSort(column: ColumnInfo): void {
     let next: SortDescriptor | null = null;
     if (!activeSort || activeSort.column !== column.name) {
@@ -541,7 +876,7 @@
     activeSort = next;
     ensureVscode().postMessage({
       command: 'applySort',
-      payload: { sort: next }
+      sort: next
     });
   }
 
@@ -559,7 +894,7 @@
   function commitFilters(): void {
     ensureVscode().postMessage({
       command: 'applyFilters',
-      payload: { filters: { ...filters } }
+      filters: { ...filters }
     });
   }
 
@@ -578,12 +913,42 @@
   }
 
   function setColumnWidth(columnName: string, width: number): void {
+    // Update the state reactively
     columnWidths = { ...columnWidths, [columnName]: width };
+    
+    // Also update DOM directly for immediate visual feedback
     const header = headerRefs[columnName];
     if (header) {
       header.style.width = `${width}px`;
       header.style.minWidth = `${width}px`;
       header.style.maxWidth = `${width}px`;
+    }
+    
+    // Update all cells in this column
+    const table = document.querySelector('.data-table');
+    if (table) {
+      const colIndex = visibleColumns.findIndex(col => col.name === columnName);
+      if (colIndex >= 0) {
+        // Update header cells (including filter row)
+        const headerCells = table.querySelectorAll(`thead th:nth-child(${colIndex + 2})`);
+        headerCells.forEach((cell: Element) => {
+          if (cell instanceof HTMLElement) {
+            cell.style.width = `${width}px`;
+            cell.style.minWidth = `${width}px`;
+            cell.style.maxWidth = `${width}px`;
+          }
+        });
+        
+        // Update body cells
+        const bodyCells = table.querySelectorAll(`tbody td:nth-child(${colIndex + 2})`);
+        bodyCells.forEach((cell: Element) => {
+          if (cell instanceof HTMLElement) {
+            cell.style.width = `${width}px`;
+            cell.style.minWidth = `${width}px`;
+            cell.style.maxWidth = `${width}px`;
+          }
+        });
+      }
     }
   }
 
@@ -624,6 +989,33 @@
     document.body.style.userSelect = 'none';
 
     attachResizeListeners(event, target);
+  }
+
+  function handleResizeKeydown(column: ColumnInfo, event: KeyboardEvent): void {
+    // Arrow keys for accessibility: Up/Right = increase width, Down/Left = decrease width
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const currentWidth = columnWidths[column.name] || 100;
+      const newWidth = Math.max(60, currentWidth - 10);
+      setColumnWidth(column.name, newWidth);
+      resizingColumnKeyboard = column.name;
+      ariaLiveMessage = `${column.name} column width decreased to ${newWidth} pixels`;
+      // Persist immediately for better user feedback
+      setTimeout(() => persistColumnWidths(), 100);
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const currentWidth = columnWidths[column.name] || 100;
+      const newWidth = currentWidth + 10;
+      setColumnWidth(column.name, newWidth);
+      resizingColumnKeyboard = column.name;
+      ariaLiveMessage = `${column.name} column width increased to ${newWidth} pixels`;
+      // Persist immediately for better user feedback
+      setTimeout(() => persistColumnWidths(), 100);
+    } else if (event.key === 'Enter' || event.key === 'Escape') {
+      event.preventDefault();
+      resizingColumnKeyboard = null;
+      persistColumnWidths();
+    }
   }
 
   function attachResizeListeners(event: ResizeEvent, handle: HTMLElement): void {
@@ -769,21 +1161,69 @@
 
   function requestPreview(): void {
     const changes = gatherChanges();
-    previewLoading = true;
-    sqlPreviewOpen = true;
-    sqlPreview = '';
+    // Client-side validation: block preview when validation errors exist (unless bypassed).
+    const errors = rows.flatMap((r) =>
+      Object.entries(r.validation ?? {})
+        .filter(([, v]) => v)
+        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
+    );
+    if (errors.length > 0 && !bypassValidation) {
+      executionError = 'Fix validation errors before generating SQL preview.';
+      sqlPreviewOpen = true;
+      sqlPreview = '';
+      previewLoading = false;
+      sqlPreviewIsError = true;
+      return;
+    }
+
+  previewLoading = true;
+  sqlPreviewOpen = true;
+  sqlPreview = '';
+  sqlPreviewIsError = false;
     ensureVscode().postMessage({
-      command: 'previewSql',
-      payload: {
-        changes,
-        primaryKey
-      }
+      command: 'previewChanges',
+      changes
     });
   }
 
   function closeSqlPreview(): void {
     sqlPreviewOpen = false;
     previewLoading = false;
+  }
+
+  function copyToSqlTerminal(): void {
+    // Normalize SQL into a single line for the SQL terminal.
+    // Steps:
+    // 1. Normalize CRLF to LF
+    // 2. Ensure semicolons are followed by a single space
+    // 3. Replace remaining newlines with spaces
+    // 4. Collapse multiple whitespace into single spaces and trim
+    // 5. Ensure the string ends with a semicolon
+    try {
+      let oneLine = String(sqlPreview || '');
+      oneLine = oneLine.replace(/\r\n?/g, '\n');
+      // Ensure semicolons are followed by a single space (handles ";\n" and ";  \n" and ";\t")
+      oneLine = oneLine.replace(/;[ \t\f\v]*\n+/g, '; ');
+      oneLine = oneLine.replace(/;[ \t\f\v]+/g, '; ');
+      // Collapse remaining newlines into spaces
+      oneLine = oneLine.replace(/\n+/g, ' ');
+      // Collapse multiple spaces into one
+      oneLine = oneLine.replace(/\s+/g, ' ').trim();
+      if (oneLine && !oneLine.endsWith(';')) {
+        oneLine = oneLine + ';';
+      }
+
+      ensureVscode().postMessage({
+        command: 'copyToSqlTerminal',
+        sql: oneLine
+      });
+    } catch (e) {
+      // Fallback to original preview if anything goes wrong
+      ensureVscode().postMessage({ command: 'copyToSqlTerminal', sql: sqlPreview });
+    } finally {
+      // Close the preview modal
+      closeSqlPreview();
+    }
   }
 
   function executeFromPreview(): void {
@@ -793,6 +1233,17 @@
 
   function requestExecution(): void {
     const changes = gatherChanges();
+    // Block execution while there are client-side validation errors (unless bypassed)
+    const errors = rows.flatMap((r) =>
+      Object.entries(r.validation ?? {})
+        .filter(([, v]) => v)
+        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
+    );
+    if (errors.length > 0 && !bypassValidation) {
+      executionError = 'Fix validation errors before executing changes.';
+      executionMessage = '';
+      return;
+    }
     if (changes.length === 0) {
       executionMessage = 'No pending changes to execute.';
       executionError = '';
@@ -803,35 +1254,102 @@
     executing = true;
     ensureVscode().postMessage({
       command: 'executeChanges',
-      payload: {
-        changes,
-        batchMode
-      }
+      changes,
+      batchMode: true,
+      bypassValidation
     });
   }
 
+  // Column preferences helpers
+  function openColumnManager(): void {
+    columnManagerOpen = true;
+  }
+
+  // Column visibility toggles and reordering are managed by ColumnManager;
+  // the component emits change/save/reset events which App.svelte consumes.
+
+  // Drag & Drop handlers for column manager reordering
+  // Drag & drop handlers removed — ColumnManager now encapsulates reordering
+  // and keyboard move logic. App.svelte will respond to events emitted by it.
+
+  // Hidden columns modal helpers
+  function openHiddenModal(): void {
+    hiddenModalOpen = true;
+  }
+
+  function showColumn(name: string): void {
+    if (hiddenColumnsSet.has(name)) {
+      hiddenColumnsSet.delete(name);
+      visibleColumns = columns.filter((c) => !hiddenColumnsSet.has(c.name));
+      // Persist immediately
+      const prefs = {
+        columnOrder: columns.map((c) => c.name),
+        hiddenColumns: Array.from(hiddenColumnsSet)
+      };
+      ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
+    }
+  }
+
+  function showAllHidden(): void {
+    hiddenColumnsSet.clear();
+    visibleColumns = columns.filter((c) => !hiddenColumnsSet.has(c.name));
+    const prefs = {
+      columnOrder: columns.map((c) => c.name),
+      hiddenColumns: []
+    };
+    ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
+    hiddenModalOpen = false;
+  }
+
+  function savePreferences(): void {
+    const prefs = {
+      columnOrder: columns.map((c) => c.name),
+      hiddenColumns: Array.from(hiddenColumnsSet)
+    };
+    ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
+  }
+
+  // Handler for ColumnManager 'change' events. Kept as a top-level function so
+  // the template can bind it without inline TypeScript annotations.
+  function handleColumnManagerChange(e: CustomEvent<{ items: { name: string; type: string; visible: boolean }[] }>) {
+    const updated = e.detail.items;
+    // Reconstruct columns ordered as user expects while preserving the
+    // authoritative ColumnInfo metadata.
+    columns = updated.map(i => masterColumnsMap.get(i.name) ?? { name: i.name, type: i.type, nullable: false });
+    hiddenColumnsSet = new Set(updated.filter(i => !i.visible).map(i => i.name));
+    visibleColumns = columns.filter((c) => !hiddenColumnsSet.has(c.name));
+  }
+
+  function handleHiddenShow(e: CustomEvent<{ name: string }>) {
+    showColumn(e.detail.name);
+  }
+
+  // Small utility functions missing after the refactor: pagination, search,
+  // and resetting preferences. These invoke the extension via postMessage.
   function requestPage(page: number): void {
-    ensureVscode().postMessage({
-      command: 'loadPage',
-      payload: {
-        page
-      }
-    });
+    ensureVscode().postMessage({ command: 'loadPage', pageNumber: page });
+    ariaLiveMessage = `Page ${page + 1} of ${Math.ceil(totalRows / paginationSize)} loaded`;
   }
 
   function executeSearch(): void {
-    ensureVscode().postMessage({
-      command: 'search',
-      payload: {
-        searchTerm: searchTerm.trim()
-      }
-    });
+    ensureVscode().postMessage({ command: 'search', term: (searchTerm || '').trim() });
+    ariaLiveMessage = searchTerm?.trim() 
+      ? `Searching for "${searchTerm.trim()}"`
+      : 'Search cleared, showing all rows';
   }
 
-  function refreshFromMessage(payload: TableStatePayload): void {
-    const snapshot = discardDraftForNextLoad ? undefined : createDraftSnapshot();
-    initialise(payload, snapshot);
-    discardDraftForNextLoad = false;
+  function resetPreferences(): void {
+    ensureVscode().postMessage({ command: 'resetTablePreferences' });
+    ariaLiveMessage = 'Column preferences reset to defaults';
+  }
+
+  function handleColumnManagerSave(e: CustomEvent<{ items: { name: string; type: string; visible: boolean }[] }>) {
+    const items = e.detail.items;
+    columns = items.map(i => masterColumnsMap.get(i.name) ?? { name: i.name, type: i.type, nullable: false });
+    hiddenColumnsSet = new Set(items.filter(i => !i.visible).map(i => i.name));
+    visibleColumns = columns.filter((c) => !hiddenColumnsSet.has(c.name));
+    const prefs = { columnOrder: columns.map((c) => c.name), hiddenColumns: Array.from(hiddenColumnsSet) };
+    ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
   }
 
   function handleMessage(event: MessageEvent): void {
@@ -839,14 +1357,24 @@
     if (!message || typeof message !== 'object') {
       return;
     }
+
     switch (message.command) {
-      case 'loadData':
-        refreshFromMessage(message.payload as TableStatePayload);
-        break;
       case 'sqlPreview':
-        sqlPreview = String(message.payload ?? '');
         previewLoading = false;
+        sqlPreviewIsError = Boolean((message as any).error);
+        sqlPreview = message.payload && typeof message.payload === 'string' ? String(message.payload) : '';
         sqlPreviewOpen = true;
+        break;
+      case 'loadData':
+        // If the webview requested a refresh that should discard local drafts,
+        // set the reset flag so createDraftSnapshot() returns an empty snapshot.
+        if (discardDraftForNextLoad) {
+          resetDraftState = true;
+          discardDraftForNextLoad = false;
+        }
+        initialise(message.payload as TableStatePayload);
+        const payload = message.payload as TableStatePayload;
+        ariaLiveMessage = `Table loaded: ${payload.totalRows} rows, page ${payload.currentPage + 1} of ${Math.ceil(payload.totalRows / payload.paginationSize)}`;
         break;
       case 'executionComplete':
         executing = false;
@@ -863,6 +1391,29 @@
         break;
       case 'showMessage':
         executionMessage = message.text ? String(message.text) : '';
+        break;
+      case 'saveTablePreferencesResult':
+        if (message.payload && (message.payload as any).success) {
+          executionMessage = 'Column preferences saved';
+          executionError = '';
+          columnManagerOpen = false;
+        } else {
+          executionError = message.payload && (message.payload as any).error ? String((message.payload as any).error) : 'Failed to save column preferences';
+        }
+        break;
+      case 'resetTablePreferencesResult':
+        if (message.payload && (message.payload as any).success) {
+          executionMessage = 'Column preferences reset to defaults';
+          executionError = '';
+          hiddenColumnsSet = new Set();
+          columns = Array.from(masterColumnsMap.values());
+          visibleColumns = columns.filter((c) => !hiddenColumnsSet.has(c.name));
+          // Ensure columns are reset and visible; the ColumnManager will be
+          // provided items derived directly from columns/hiddenColumnsSet.
+          columnManagerOpen = false;
+        } else {
+          executionError = message.payload && (message.payload as any).error ? String((message.payload as any).error) : 'Failed to reset column preferences';
+        }
         break;
       default:
         break;
@@ -918,10 +1469,10 @@
           {/if}
         </p>
       </div>
-      <div class="actions" role="toolbar" aria-label="Table actions">
-        <label class="batch-toggle">
-          <input type="checkbox" bind:checked={batchMode}>
-          <span>Batch mode</span>
+  <div class="actions" role="toolbar" aria-label="Table actions">
+        <label class="bypass-toggle" title="Skip client-side validation and let the database enforce constraints">
+          <input type="checkbox" bind:checked={bypassValidation}>
+          <span>Bypass validation</span>
         </label>
         <button type="button" class="ps-btn ps-btn--primary" on:click={addRow}>Add row</button>
         <button
@@ -938,7 +1489,8 @@
           type="button"
           class="ps-btn ps-btn--accent"
           on:click={requestExecution}
-          disabled={executing}
+          disabled={executing || (hasValidationErrors && !bypassValidation)}
+          title={hasValidationErrors && !bypassValidation ? 'Fix validation errors before executing' : undefined}
         >
           Execute
         </button>
@@ -950,8 +1502,58 @@
         >
           Clear filters
         </button>
+  <button type="button" class="ps-btn" on:click={openColumnManager}>Columns</button>
+  <button type="button" class="ps-btn" on:click={openHiddenModal}>Hidden</button>
       </div>
     </header>
+
+    {#if columnManagerOpen}
+      <div class="modal-backdrop">
+        <FocusTrap ariaLabel="Column Manager" on:escapepressed={() => columnManagerOpen = false}>
+          <div class="modal dialog column-manager" role="dialog" aria-modal="true" aria-labelledby="column-manager-heading">
+            <h2 id="column-manager-heading" class="sr-only">Manage Columns</h2>
+            <ColumnManager
+              items={columns.map((c) => ({ name: c.name, type: c.type, visible: !hiddenColumnsSet.has(c.name) }))}
+              on:change={handleColumnManagerChange}
+              on:save={handleColumnManagerSave}
+              on:reset={() => resetPreferences()}
+              on:cancel={() => columnManagerOpen = false}
+            />
+          </div>
+        </FocusTrap>
+      </div>
+    {/if}
+
+    {#if hiddenModalOpen}
+      <HiddenColumnsModal
+        hidden={Array.from(hiddenColumnsSet)}
+        on:show={handleHiddenShow}
+        on:showAll={() => { showAllHidden(); }}
+        on:close={() => { hiddenModalOpen = false; }}
+      />
+    {/if}
+
+    {#if fkSelectorOpen && fkSelectorColumn}
+      <FKSelectorModal
+        column={fkSelectorColumn}
+        schemaName={schemaName}
+        tableName={tableName}
+        isOpen={fkSelectorOpen}
+        {vscode}
+        on:fkSelected={handleFKSelected}
+        on:close={closeFKSelector}
+      />
+    {/if}
+
+    {#if dateTimeModalOpen && dateTimeColumn}
+      <DateTimeModal
+        isOpen={dateTimeModalOpen}
+        value={dateTimeValue}
+        columnType={dateTimeColumn.type}
+        onClose={closeDateTimeModal}
+        onSave={handleDateTimeSaved}
+      />
+    {/if}
 
     <section class="toolbar">
       <div class="toolbar-group toolbar-search">
@@ -960,6 +1562,12 @@
           placeholder="Search this table…"
           bind:value={searchTerm}
           on:keydown={(event) => event.key === 'Enter' && executeSearch()}
+          on:search={() => {
+            // Handle native browser clear button (X in search inputs)
+            if (!searchTerm || searchTerm.trim().length === 0) {
+              executeSearch();
+            }
+          }}
         >
         <button type="button" class="ps-btn ps-btn--ghost" on:click={executeSearch}>Search</button>
       </div>
@@ -988,7 +1596,7 @@
       <table>
         <colgroup>
           <col class="select-column">
-          {#each columns as column}
+          {#each visibleColumns as column}
             <col style={columnStyle(column)}>
           {/each}
           <col class="row-actions-column">
@@ -998,7 +1606,7 @@
             <th class="select-cell">
               <input type="checkbox" checked={selectAll} on:change={toggleSelectAll}>
             </th>
-            {#each columns as column}
+            {#each visibleColumns as column}
               <th
                 class="column-header-cell"
                 use:registerHeader={column.name}
@@ -1010,19 +1618,38 @@
                     {#if primaryKey.includes(column.name)}
                       <span class="pk" title="Primary key">🔑</span>
                     {/if}
+                    {#if column.foreignKey}
+                      <span class="fk" title={`Foreign key: ${column.foreignKey.referencedSchema}.${column.foreignKey.referencedTable}.${column.foreignKey.referencedColumn}`}>🔗</span>
+                    {/if}
+                    {#if column.isUnique}
+                      <span class="unique" title="Unique constraint">✓</span>
+                    {/if}
+                    {#if column.isIndexed}
+                      <button 
+                        type="button" 
+                        class="index-indicator" 
+                        title="Click to manage indexes for this table"
+                        on:click={(event) => {
+                          event.stopPropagation();
+                          ensureVscode().postMessage({ command: 'openIndexManager' });
+                        }}
+                      >📑</button>
+                    {/if}
                     {#if sortIndicator(column)}
                       <span class="sort-indicator">{sortIndicator(column)}</span>
                     {/if}
                   </button>
+                  <button
+                    type="button"
+                    class="resize-handle"
+                    tabindex="0"
+                    aria-label={`Resize ${column.name} column. Use arrow keys to adjust width.`}
+                    on:pointerdown={(event) => startResize(column, event)}
+                    on:mousedown={(event) => startResize(column, event)}
+                    on:keydown={(event) => handleResizeKeydown(column, event)}
+                    title="Drag to resize, or use arrow keys (Left/Right to decrease/increase width)"
+                  ></button>
                 </div>
-                <span
-                  class="resize-handle"
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-hidden="true"
-                  on:pointerdown={(event) => startResize(column, event)}
-                  on:mousedown={(event) => startResize(column, event)}
-                ></span>
                 <small>{column.type}</small>
               </th>
             {/each}
@@ -1030,7 +1657,7 @@
           </tr>
           <tr class="filters">
             <th></th>
-            {#each columns as column}
+            {#each visibleColumns as column}
               <th style={columnStyle(column)}>
                 <input
                   type="text"
@@ -1054,25 +1681,50 @@
                   checked={row.selected}
                   disabled={row.deleted}
                   on:change={(event) => toggleRowSelection(row, event)}
+                  on:click={(event) => handleRowCheckboxClick(row, event)}
+                  title="Click to select, Shift+Click to select a range"
                 >
               </td>
-              {#each columns as column}
-                {#if column.type === 'boolean' || column.type === 'bool'}
+              {#each visibleColumns as column}
+                {#if column.enumValues && column.enumValues.length > 0 && !String(column.type).endsWith('[]')}
+                    {@const err = row.validation?.[column.name]}
+                  <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
+                    <select
+                      disabled={row.deleted}
+                      value={row.current[column.name] ?? ''}
+                      on:change={(event) => handleEnumSelectChange(row, column, event)}
+                      aria-invalid={err ? 'true' : 'false'}
+                      aria-describedby={err ? errorId(row.id, column.name) : undefined}
+                    >
+                      <option value="">NULL</option>
+                      {#each column.enumValues as option}
+                        <option value={option}>{option}</option>
+                      {/each}
+                    </select>
+                    <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
+                  </td>
+                {:else if column.type === 'boolean' || column.type === 'bool'}
+                    {@const err = row.validation?.[column.name]}
                   <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
                     <input
                       type="checkbox"
                       checked={Boolean(row.current[column.name])}
                       disabled={row.deleted}
                       on:change={(event) => handleBooleanChange(row, column, event)}
+                      aria-invalid={err ? 'true' : 'false'}
+                      aria-describedby={err ? errorId(row.id, column.name) : undefined}
                     >
+                    <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                   </td>
-                {:else if column.type === 'json' || column.type === 'jsonb'}
-                  <td class={clsx('cell json', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
+                {:else if column.type === 'json' || column.type === 'jsonb' || String(column.type).endsWith('[]')}
+                    {@const err = row.validation?.[column.name]}
+                  <td class={clsx('cell json', { modified: isColumnModified(row, column), 'cell-error-state': err })} style={columnStyle(column)}>
                     <button
                       type="button"
                       class="ps-btn ps-btn--ghost json-button"
                       disabled={row.deleted}
                       on:click={() => openJsonEditor(row, column)}
+                      aria-describedby={err ? errorId(row.id, column.name) : undefined}
                     >
                       {#if row.current[column.name] === null}
                         <span class="null">NULL</span>
@@ -1084,8 +1736,10 @@
                         {/if}
                       {/if}
                     </button>
+                    <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                   </td>
-                {:else}
+                {:else if column.foreignKey}
+                    {@const err = row.validation?.[column.name]}
                   <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
                     <div class="cell-edit">
                       <input
@@ -1094,7 +1748,78 @@
                         disabled={row.deleted}
                         on:input={(event) => handleTextInput(row, column, event)}
                         class="cell-input"
+                        aria-invalid={err ? 'true' : 'false'}
+                        aria-describedby={err ? errorId(row.id, column.name) : undefined}
+                        placeholder="Enter FK value or click..."
                       >
+                      <button
+                        type="button"
+                        class="ps-btn ps-btn--icon text-expand-button"
+                        disabled={row.deleted}
+                        on:click={() => openFKSelector(row, column)}
+                        title="Browse and select from referenced table"
+                      >
+                        🔗
+                      </button>
+                      <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
+                    </div>
+                  </td>
+                {:else if /timestamp|date|time/i.test(column.type)}
+                    {@const err = row.validation?.[column.name]}
+                  <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
+                    <div class="cell-edit">
+                      <input
+                        type="text"
+                        value={formatCellValue(row.current[column.name], column)}
+                        disabled={row.deleted}
+                        on:input={(event) => handleTextInput(row, column, event)}
+                        class="cell-input"
+                        aria-invalid={err ? 'true' : 'false'}
+                        aria-describedby={err ? errorId(row.id, column.name) : undefined}
+                        placeholder="Enter date/time or click..."
+                      >
+                      <button
+                        type="button"
+                        class="ps-btn ps-btn--icon text-expand-button"
+                        disabled={row.deleted}
+                        on:click={() => openDateTimeModal(row, column)}
+                        title="Open date/time picker"
+                      >
+                        📅
+                      </button>
+                      <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
+                    </div>
+                  </td>
+                {:else}
+                    {@const err = row.validation?.[column.name]}
+                    {@const isUuidPk = primaryKey.includes(column.name) && column.type.toLowerCase() === 'uuid'}
+                  <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
+                    <div class="cell-edit">
+                      <input
+                        type="text"
+                        inputmode={isIntegerType(column.type) ? 'numeric' : isFloatType(column.type) ? 'decimal' : undefined}
+                        pattern={isIntegerType(column.type) ? '\\d*' : isFloatType(column.type) ? '[-+]?\\d*(\\.\\d+)?' : undefined}
+                        value={formatCellValue(row.current[column.name], column)}
+                        disabled={row.deleted}
+                        on:input={(event) => handleTextInput(row, column, event)}
+                        class="cell-input"
+                        aria-invalid={err ? 'true' : 'false'}
+                        aria-describedby={err ? errorId(row.id, column.name) : undefined}
+                      >
+                      {#if isUuidPk && row.isNew}
+                        <button
+                          type="button"
+                          class="ps-btn ps-btn--icon text-expand-button"
+                          disabled={row.deleted}
+                          on:click={() => {
+                            const uuid = generateUUID();
+                            updateCell(row, column, uuid);
+                          }}
+                          title="Generate random UUID"
+                        >
+                          🎲
+                        </button>
+                      {/if}
                       <button
                         type="button"
                         class="ps-btn ps-btn--icon text-expand-button"
@@ -1104,6 +1829,7 @@
                       >
                         📝
                       </button>
+                      <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                     </div>
                   </td>
                 {/if}
@@ -1117,9 +1843,9 @@
               </td>
             </tr>
           {/each}
-          {#if rows.length === 0}
+            {#if rows.length === 0}
             <tr>
-              <td class="empty" colspan={columns.length + 2}>No rows in this page.</td>
+              <td class="empty" colspan={visibleColumns.length + 2}>No rows in this page.</td>
             </tr>
           {/if}
         </tbody>
@@ -1134,711 +1860,170 @@
       {#if executionError}
         <div class="message error">{executionError}</div>
       {/if}
+      
+      <!-- ARIA live region for dynamic announcements -->
+      <div role="status" aria-live="polite" aria-atomic="true" class="aria-live-region">
+        {ariaLiveMessage}
+      </div>
     </section>
   </div>
 
   {#if sqlPreviewOpen}
-    <div class="modal">
-      <div class="modal-content preview-modal">
-        <header>
-          <h3>SQL Preview</h3>
-        </header>
-        {#if previewLoading}
-          <p class="preview-status">Generating SQL preview…</p>
-        {:else if sqlPreview}
-          <pre>{sqlPreview}</pre>
-        {:else}
-          <p class="preview-status">No SQL changes to display.</p>
-        {/if}
-        <footer>
-          <button type="button" class="ps-btn" on:click={closeSqlPreview}>Cancel</button>
-          <button
-            type="button"
-            class="ps-btn ps-btn--accent"
-            on:click={executeFromPreview}
-            disabled={executing || previewLoading}
-          >
-            Execute
-          </button>
-        </footer>
-      </div>
+    <div class="modal-backdrop">
+      <FocusTrap ariaLabel="SQL Preview" on:escapepressed={closeSqlPreview}>
+        <div
+          class="modal dialog preview-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sql-preview-heading"
+          aria-describedby="sql-preview-content"
+        >
+          <header class="modal-header">
+            <h3 id="sql-preview-heading">SQL Preview</h3>
+          </header>
+          <div id="sql-preview-content" class="modal-body">
+            {#if previewLoading}
+              <p class="preview-status">Generating SQL preview…</p>
+            {:else if sqlPreviewIsError}
+              <div class="sql-error-banner" role="alert" aria-live="polite">
+                <strong>Error generating SQL</strong>
+                <p class="sql-error-msg">{sqlPreview}</p>
+              </div>
+              <pre class="sql-preview">{sqlPreview}</pre>
+            {:else if sqlPreview}
+              <pre class="sql-preview">{sqlPreview}</pre>
+            {:else}
+              <p class="preview-status">No SQL changes to display.</p>
+            {/if}
+          </div>
+          <footer class="modal-actions" role="group">
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={closeSqlPreview}
+              title="Close preview (Escape)"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={copyToSqlTerminal}
+              disabled={executing || previewLoading || !sqlPreview}
+              title="Copy SQL to clipboard"
+            >
+              📋 Copy to Clipboard
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--accent"
+              on:click={executeFromPreview}
+              disabled={executing || previewLoading || (hasValidationErrors && !bypassValidation)}
+              title={hasValidationErrors && !bypassValidation ? 'Fix validation errors before executing' : 'Execute changes (Enter)'}
+            >
+              Execute
+            </button>
+          </footer>
+        </div>
+      </FocusTrap>
     </div>
   {/if}
 
   {#if jsonEditorOpen && jsonEditorRow && jsonEditorColumn}
-    <div class="modal">
-      <div class="modal-content">
-        <header>
-          <h3>Edit {jsonEditorColumn.name} (JSON)</h3>
-        </header>
-        <textarea
-          bind:value={jsonDraft}
-          spellcheck={false}
-          class={jsonError ? 'invalid' : ''}
-        ></textarea>
-        {#if jsonError}
-          <p class="error">{jsonError}</p>
-        {/if}
-        <footer>
-          <button type="button" class="ps-btn" on:click={closeJsonEditor}>Cancel</button>
-          <button type="button" class="ps-btn ps-btn--accent" on:click={saveJsonDraft}>Save</button>
-        </footer>
-      </div>
+    <div class="modal-backdrop">
+      <FocusTrap ariaLabel="JSON Editor" on:escapepressed={closeJsonEditor}>
+        <div
+          class="modal dialog json-editor-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="json-editor-heading"
+          aria-describedby="json-editor-description"
+        >
+          <header class="modal-header">
+            <h3 id="json-editor-heading">Edit {jsonEditorColumn.name} ({editorLabel(jsonEditorColumn)})</h3>
+            {#if jsonEditorColumn.enumValues && jsonEditorColumn.enumValues.length > 0}
+              <p id="json-editor-description" class="enum-hint">Allowed values: {jsonEditorColumn.enumValues.join(', ')}</p>
+            {/if}
+          </header>
+          <div class="modal-body">
+            <textarea
+              bind:this={jsonTextarea}
+              bind:value={jsonDraft}
+              spellcheck={false}
+              class={jsonError ? 'invalid' : ''}
+              aria-label="JSON content editor"
+              aria-describedby={jsonError ? 'json-error-message' : undefined}
+              aria-invalid={jsonError ? 'true' : 'false'}
+            ></textarea>
+            {#if jsonError}
+              <p id="json-error-message" class="error" role="alert">{jsonError}</p>
+            {/if}
+          </div>
+          <footer class="modal-actions" role="group">
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={closeJsonEditor}
+              title="Close without saving (Escape)"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--accent"
+              on:click={saveJsonDraft}
+              title="Save changes (Enter or primary action)"
+            >
+              Save
+            </button>
+          </footer>
+        </div>
+      </FocusTrap>
     </div>
   {/if}
 
   {#if textEditorOpen && textEditorRow && textEditorColumn}
-    <div class="modal">
-      <div class="modal-content">
-        <header>
-          <h3>Edit {textEditorColumn.name} (Text)</h3>
-        </header>
-        <textarea
-          bind:value={textDraft}
-          spellcheck={false}
-        ></textarea>
-        <footer>
-          <button type="button" class="ps-btn" on:click={closeTextEditor}>Cancel</button>
-          <button type="button" class="ps-btn ps-btn--accent" on:click={saveTextDraft}>Save</button>
-        </footer>
-      </div>
+    <div class="modal-backdrop">
+      <FocusTrap ariaLabel="Text Editor" on:escapepressed={closeTextEditor}>
+        <div
+          class="modal dialog text-editor-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="text-editor-heading"
+        >
+          <header class="modal-header">
+            <h3 id="text-editor-heading">Edit {textEditorColumn.name} (Text)</h3>
+          </header>
+          <div class="modal-body">
+            <textarea
+              bind:this={textTextarea}
+              bind:value={textDraft}
+              spellcheck={false}
+              aria-label="Text content editor"
+            ></textarea>
+          </div>
+          <footer class="modal-actions" role="group">
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={closeTextEditor}
+              title="Close without saving (Escape)"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--accent"
+              on:click={saveTextDraft}
+              title="Save changes (Enter or primary action)"
+            >
+              Save
+            </button>
+          </footer>
+        </div>
+      </FocusTrap>
     </div>
   {/if}
 {/if}
 
-<style>
-  .loading {
-    padding: calc(var(--ps-spacing-xl) * 1.25);
-    text-align: center;
-    color: var(--ps-text-secondary);
-  }
-
-  .container {
-    padding: var(--ps-spacing-lg);
-    display: flex;
-    flex-direction: column;
-    gap: var(--ps-spacing-lg);
-    background: var(--ps-surface);
-  }
-
-  .header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--ps-spacing-lg);
-    padding: var(--ps-spacing-md) var(--ps-spacing-lg);
-    background: var(--ps-surface-subtle);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-radius-lg);
-    flex-wrap: wrap;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
-  }
-
-  .header-title {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ps-spacing-xs);
-    min-width: 220px;
-  }
-
-  .header-title h2 {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--ps-text-primary);
-    display: flex;
-    align-items: baseline;
-    gap: var(--ps-spacing-xs);
-  }
-
-  .schema-name {
-    opacity: 0.9;
-  }
-
-  .delimiter {
-    opacity: 0.6;
-  }
-
-  .table-name {
-    color: var(--ps-accent-foreground);
-    background: var(--ps-accent-muted);
-    padding: 0 var(--ps-spacing-xs);
-    border-radius: var(--ps-radius-sm);
-  }
-
-  .subheader {
-    margin: 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--ps-spacing-xs);
-    color: var(--ps-text-secondary);
-    font-size: 0.9rem;
-  }
-
-  .separator {
-    color: var(--ps-text-tertiary);
-  }
-
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 0 var(--ps-spacing-sm);
-    height: 22px;
-    border-radius: 999px;
-    background: var(--ps-accent-muted);
-    color: var(--ps-accent-foreground);
-    font-weight: 500;
-    font-size: 0.75rem;
-    letter-spacing: 0.01em;
-  }
-
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: var(--ps-spacing-sm);
-    flex-wrap: wrap;
-  }
-
-  .batch-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ps-spacing-xs);
-    padding: var(--ps-spacing-xs) var(--ps-spacing-sm);
-    border-radius: var(--ps-radius-sm);
-    background: var(--ps-surface-muted);
-    color: var(--ps-text-secondary);
-    border: 1px solid transparent;
-    transition: border-color 160ms ease;
-  }
-
-  .batch-toggle:focus-within {
-    border-color: var(--ps-focus-ring);
-  }
-
-  .batch-toggle input {
-    width: 16px;
-    height: 16px;
-  }
-
-  .ps-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--ps-spacing-2xs);
-    border-radius: var(--ps-radius-sm);
-    border: 1px solid transparent;
-    background: var(--ps-surface-subtle);
-    color: var(--ps-text-primary);
-    padding: calc(var(--ps-spacing-xs) + 2px) var(--ps-spacing-md);
-    cursor: pointer;
-    transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
-      transform 160ms ease;
-    min-height: 30px;
-    text-decoration: none;
-  }
-
-  .ps-btn:hover:enabled {
-    background: color-mix(in srgb, var(--ps-accent) 20%, var(--ps-surface-subtle));
-  }
-
-  .ps-btn:focus-visible {
-    outline: 2px solid var(--ps-focus-ring);
-    outline-offset: 1px;
-  }
-
-  .ps-btn:active:enabled {
-    transform: translateY(1px);
-  }
-
-  .ps-btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  .ps-btn--primary,
-  .ps-btn--accent {
-    background: var(--ps-accent);
-    color: var(--ps-accent-foreground);
-    border-color: var(--ps-accent-border);
-  }
-
-  .ps-btn--accent:hover:enabled,
-  .ps-btn--primary:hover:enabled {
-    background: var(--ps-accent-hover);
-  }
-
-  .ps-btn--ghost {
-    background: transparent;
-    border-color: var(--ps-border);
-    color: var(--ps-text-primary);
-  }
-
-  .ps-btn--ghost:hover:enabled {
-    background: var(--ps-surface-muted);
-  }
-
-  .ps-btn--link {
-    background: transparent;
-    color: var(--vscode-textLink-foreground, #3794ff);
-    padding: var(--ps-spacing-xs) var(--ps-spacing-xs);
-  }
-
-  .ps-btn--link:hover:enabled {
-    text-decoration: underline;
-  }
-
-  .ps-btn--icon {
-    width: 28px;
-    height: 28px;
-    padding: var(--ps-spacing-2xs);
-  }
-
-  .toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--ps-spacing-md);
-    flex-wrap: wrap;
-    background: var(--ps-surface-subtle);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-radius-lg);
-    padding: var(--ps-spacing-sm) var(--ps-spacing-lg);
-  }
-
-  .toolbar-group {
-    display: flex;
-    align-items: center;
-    gap: var(--ps-spacing-sm);
-    flex-wrap: wrap;
-  }
-
-  .toolbar-search input[type='search'] {
-    min-width: 220px;
-  }
-
-  input[type='search'],
-  input[type='text'] {
-    border-radius: var(--ps-radius-sm);
-    border: 1px solid var(--ps-border);
-    background: var(--ps-surface-elevated);
-    color: var(--ps-text-primary);
-    padding: var(--ps-spacing-xs) var(--ps-spacing-md);
-    min-width: 140px;
-    transition: border-color 160ms ease, box-shadow 160ms ease;
-  }
-
-  input[type='search']:focus,
-  input[type='text']:focus {
-    border-color: var(--ps-focus-ring);
-    box-shadow: 0 0 0 1px var(--ps-focus-ring);
-    outline: none;
-  }
-
-  input[type='checkbox'] {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--ps-accent);
-  }
-
-  input[type='checkbox']:focus-visible {
-    outline: 2px solid var(--ps-focus-ring);
-    outline-offset: 1px;
-  }
-
-  .pagination {
-    color: var(--ps-text-secondary);
-  }
-
-  .table-wrapper {
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-radius-lg);
-    overflow: auto;
-    max-width: 100%;
-    background: var(--ps-surface-subtle);
-    box-shadow: var(--ps-shadow-soft);
-    position: relative;
-  }
-
-  table {
-    width: auto;
-    min-width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    font-size: 13px;
-    table-layout: fixed;
-  }
-
-  col.select-column {
-    width: 36px;
-  }
-
-  col.row-actions-column {
-    width: 96px;
-  }
-
-  thead {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-  }
-
-  th,
-  td {
-    border-bottom: 1px solid var(--ps-border);
-    padding: var(--ps-spacing-sm) var(--ps-spacing-md);
-    text-align: left;
-    vertical-align: middle;
-  }
-
-  td {
-    overflow: hidden;
-    background: var(--ps-surface-subtle);
-    transition: background-color 160ms ease;
-  }
-
-  th {
-    font-weight: 600;
-    color: var(--ps-text-primary);
-    background: var(--ps-surface-elevated);
-    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-  }
-
-  .column-header {
-    display: flex;
-    align-items: center;
-    gap: var(--ps-spacing-xs);
-    position: relative;
-  }
-
-  .column-header-cell {
-    position: relative;
-    padding-right: var(--ps-spacing-lg);
-  }
-
-  .column-header-cell small {
-    display: block;
-    margin-top: var(--ps-spacing-2xs);
-    color: var(--ps-text-tertiary);
-    font-weight: 400;
-    font-size: 0.75rem;
-  }
-
-  .header-button {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ps-spacing-2xs);
-    background: transparent;
-    color: inherit;
-    padding: 0;
-    border: none;
-    cursor: pointer;
-    font: inherit;
-    text-align: left;
-  }
-
-  .header-button:hover,
-  .header-button:focus-visible {
-    text-decoration: underline;
-  }
-
-  .pk {
-    font-size: 1rem;
-    opacity: 0.8;
-  }
-
-  .sort-indicator {
-    font-size: 0.75rem;
-    opacity: 0.85;
-  }
-
-  .filters th {
-    background: var(--ps-surface-elevated);
-  }
-
-  .filters input {
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  tbody tr {
-    transition: background-color 160ms ease, border-color 160ms ease;
-  }
-
-  tbody tr:hover {
-    background: var(--ps-selection);
-  }
-
-  tbody tr:hover td {
-    background: var(--ps-selection);
-  }
-
-  tbody tr:hover td.cell.modified {
-    background: color-mix(in srgb, var(--ps-accent) 32%, var(--ps-selection));
-  }
-
-  tbody tr:nth-child(even) td {
-    background: color-mix(in srgb, var(--ps-surface-subtle) 85%, transparent);
-  }
-
-  .select-cell {
-    width: 36px;
-    text-align: center;
-  }
-
-  .cell.modified {
-    background: color-mix(in srgb, var(--ps-accent) 24%, transparent);
-  }
-
-  tr.modified td.select-cell {
-    border-left: 4px solid var(--ps-focus-ring);
-  }
-
-  tr.deleted {
-    opacity: 0.6;
-    text-decoration: line-through;
-  }
-
-  .cell-edit {
-    display: flex;
-    align-items: center;
-    gap: var(--ps-spacing-2xs);
-  }
-
-  .cell-input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .ps-btn--icon.text-expand-button {
-    border-color: var(--ps-border);
-  }
-
-  .ps-btn--icon.text-expand-button:hover:enabled {
-    border-color: var(--ps-focus-ring);
-  }
-
-  .json {
-    font-family: var(--vscode-editor-font-family, monospace);
-  }
-
-  .json-button {
-    width: 100%;
-    justify-content: flex-start;
-    text-align: left;
-    border-color: var(--ps-border);
-  }
-
-  .json-button:hover:enabled {
-    border-color: var(--ps-focus-ring);
-  }
-
-  .json .null {
-    opacity: 0.6;
-    font-style: italic;
-  }
-
-  .row-actions {
-    width: 96px;
-    text-align: right;
-    white-space: nowrap;
-  }
-
-  .empty {
-    text-align: center;
-    padding: var(--ps-spacing-xl);
-    color: var(--ps-text-secondary);
-  }
-
-  .feedback {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ps-spacing-sm);
-  }
-
-  .message {
-    padding: var(--ps-spacing-sm) var(--ps-spacing-md);
-    border-radius: var(--ps-radius-md);
-    border: 1px solid transparent;
-    background: var(--ps-surface-subtle);
-    color: var(--ps-text-primary);
-  }
-
-  .message.success {
-    background: var(--ps-success-bg);
-    border-color: var(--ps-success-border);
-  }
-
-  .message.error {
-    background: var(--ps-danger-bg);
-    border-color: var(--ps-danger-border);
-  }
-
-  .resize-handle {
-    position: absolute;
-    top: 0;
-    right: -4px;
-    width: 8px;
-    height: 100%;
-    cursor: col-resize;
-    z-index: 3;
-    touch-action: none;
-  }
-
-  .resize-handle::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    width: 2px;
-    background: transparent;
-    transform: translateX(-50%);
-    transition: background-color 160ms ease;
-  }
-
-  .resize-handle:hover::before {
-    background: var(--ps-focus-ring);
-  }
-
-  .resize-handle:active::before {
-    background: var(--ps-accent);
-  }
-
-  pre {
-    margin: 0;
-    padding: var(--ps-spacing-md);
-    background: var(--vscode-terminal-background, #1e1e1e);
-    border-radius: var(--ps-radius-md);
-    border: 1px solid var(--ps-border);
-    max-height: 360px;
-    overflow: auto;
-  }
-
-  .modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    backdrop-filter: blur(6px);
-    animation: fade-in 160ms ease forwards;
-  }
-
-  .modal-content {
-    width: min(720px, 90vw);
-    background: var(--ps-surface-elevated);
-    border-radius: var(--ps-radius-lg);
-    border: 1px solid var(--ps-border-strong);
-    padding: var(--ps-spacing-lg);
-    display: flex;
-    flex-direction: column;
-    gap: var(--ps-spacing-md);
-    box-shadow: var(--ps-shadow-soft);
-    animation: scale-in 160ms ease forwards;
-  }
-
-  .modal-content header h3 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: var(--ps-text-primary);
-  }
-
-  textarea {
-    min-height: 280px;
-    font-family: var(--vscode-editor-font-family, monospace);
-    background: var(--ps-surface-subtle);
-    color: var(--ps-text-primary);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-radius-md);
-    padding: var(--ps-spacing-md);
-    resize: vertical;
-  }
-
-  textarea:focus {
-    border-color: var(--ps-focus-ring);
-    outline: none;
-    box-shadow: 0 0 0 1px var(--ps-focus-ring);
-  }
-
-  textarea.invalid {
-    border-color: var(--ps-danger-border);
-  }
-
-  .modal-content.preview-modal {
-    width: min(900px, 95vw);
-  }
-
-  .preview-status {
-    margin: 0;
-    color: var(--ps-text-secondary);
-  }
-
-  footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--ps-spacing-sm);
-  }
-
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-
-  @keyframes scale-in {
-    from {
-      transform: translateY(6px) scale(0.97);
-      opacity: 0;
-    }
-    to {
-      transform: translateY(0) scale(1);
-      opacity: 1;
-    }
-  }
-
-  @media (max-width: 900px) {
-    .header,
-    .toolbar {
-      padding: var(--ps-spacing-md);
-    }
-
-    .actions {
-      width: 100%;
-      justify-content: flex-start;
-    }
-
-    .header-title h2 {
-      font-size: 1.3rem;
-    }
-  }
-
-  @media (forced-colors: active) {
-    .header,
-    .toolbar,
-    .table-wrapper,
-    .modal-content {
-      border: 1px solid CanvasText;
-      box-shadow: none;
-    }
-
-    .ps-btn,
-    .json-button {
-      forced-color-adjust: none;
-      border-color: CanvasText;
-      background: Canvas;
-      color: CanvasText;
-    }
-
-    .badge {
-      border: 1px solid CanvasText;
-      background: Canvas;
-      color: CanvasText;
-    }
-  }
-</style>
+<!-- Styles moved to webview/src/data-editor.css -->

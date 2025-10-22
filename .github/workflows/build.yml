@@ -1,0 +1,42 @@
+name: Build
+
+on:
+  pull_request:
+    branches: [ 'main' ]
+
+jobs:
+  build:
+    name: Build extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm install -D svelte-preprocess
+          npm ci
+          npm ci --prefix webview
+
+      - name: Build webview
+        working-directory: ./webview
+        run: npm run build
+
+      - name: Compile TypeScript
+        run: npm run compile
+
+      - name: Package extension
+        run: npm run vscode:package
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-package
+          path: postgresheets-*.vsix

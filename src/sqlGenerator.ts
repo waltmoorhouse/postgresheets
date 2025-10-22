@@ -1,14 +1,15 @@
 // sqlGenerator.ts - Generates SQL statements for INSERT, UPDATE, DELETE
 
+import { quoteIdentifier } from './tableSqlBuilder';
+import type { GridChange, RowData } from './types';
+
 export interface SqlResult {
     query: string;
-    values: any[];
+    values: unknown[];
 }
 
-import { quoteIdentifier } from './tableSqlBuilder';
-
 export class SqlGenerator {
-    static generateSql(schemaName: string, tableName: string, change: any): SqlResult {
+    static generateSql(schemaName: string, tableName: string, change: GridChange): SqlResult {
         const fullTableName = `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
 
         switch (change.type) {
@@ -18,23 +19,21 @@ export class SqlGenerator {
                 return this.generateUpdate(fullTableName, change.data, change.where);
             case 'delete':
                 return this.generateDelete(fullTableName, change.where);
-            default:
-                throw new Error(`Unknown change type: ${change.type}`);
         }
     }
 
-    private static generateInsert(tableName: string, data: any): SqlResult {
+    private static generateInsert(tableName: string, data: RowData): SqlResult {
         const columns = Object.keys(data);
         const values = Object.values(data);
         const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
         
-    const columnList = columns.map(c => quoteIdentifier(c)).join(', ');
+        const columnList = columns.map(c => quoteIdentifier(c)).join(', ');
         const query = `INSERT INTO ${tableName} (${columnList}) VALUES (${placeholders})`;
         
         return { query, values };
     }
 
-    private static generateUpdate(tableName: string, data: any, where: any): SqlResult {
+    private static generateUpdate(tableName: string, data: RowData, where: RowData): SqlResult {
         const dataColumns = Object.keys(data);
         const whereColumns = Object.keys(where);
         
@@ -55,7 +54,7 @@ export class SqlGenerator {
         return { query, values };
     }
 
-    private static generateDelete(tableName: string, where: any): SqlResult {
+    private static generateDelete(tableName: string, where: RowData): SqlResult {
         const whereColumns = Object.keys(where);
         const whereValues = Object.values(where);
         
@@ -68,7 +67,7 @@ export class SqlGenerator {
         return { query, values: whereValues };
     }
 
-    static formatSqlWithValues(query: string, values: any[]): string {
+    static formatSqlWithValues(query: string, values: unknown[]): string {
         let formattedQuery = query;
         values.forEach((value, i) => {
             const placeholder = `$${i + 1}`;

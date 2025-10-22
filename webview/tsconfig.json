@@ -2,6 +2,7 @@
   "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "verbatimModuleSyntax": true,
     "paths": {
       "$lib/*": ["src/lib/*"]
     },

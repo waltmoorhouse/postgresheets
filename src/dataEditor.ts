@@ -4,23 +4,22 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from './connectionManager';
 import { DatabaseTreeItem } from './databaseTreeProvider';
 import { SqlGenerator } from './sqlGenerator';
-
-interface ColumnInfo {
-    name: string;
-    type: string;
-    nullable: boolean;
-}
-
-interface PrimaryKeyInfo {
-    columns: string[];
-}
-
-interface SortDescriptor {
-    column: string;
-    direction: 'asc' | 'desc';
-}
-
-type FilterMap = Record<string, string>;
+import { IndexManagerView } from './indexManagerView';
+import { parsePostgresArrayLiteral, applyEnumLabelsToColumns } from './pgUtils';
+import type {
+    ColumnInfo,
+    PrimaryKeyInfo,
+    SortDescriptor,
+    FilterMap,
+    TablePreferences,
+    TableStatePayload,
+    GridChange,
+    ExtensionToWebviewMessage,
+    WebviewToExtensionMessage,
+    QueryResultRow,
+    ColumnTypeMetadata
+} from './types';
+import { isWebviewToExtension } from './types';
 
 interface PanelState {
     page: number;
@@ -29,43 +28,10 @@ interface PanelState {
     searchTerm: string;
 }
 
-interface TableStatePayload {
-    schemaName: string;
-    tableName: string;
+interface CachedSchemaMetadata {
     columns: ColumnInfo[];
-    primaryKey: PrimaryKeyInfo;
-    rows: Record<string, unknown>[];
-    currentPage: number;
-    totalRows: number;
-    paginationSize: number;
-    batchMode: boolean;
-    sort: SortDescriptor | null;
-    filters: FilterMap;
-    searchTerm: string;
-}
-
-interface GridChangeInsert {
-    type: 'insert';
-    data: Record<string, unknown>;
-}
-
-interface GridChangeUpdate {
-    type: 'update';
-    data: Record<string, unknown>;
-    where: Record<string, unknown>;
-}
-
-interface GridChangeDelete {
-    type: 'delete';
-    where: Record<string, unknown>;
-}
-
-type GridChange = GridChangeInsert | GridChangeUpdate | GridChangeDelete;
-
-interface WebviewMessage {
-    command: string;
-    payload?: unknown;
-    [key: string]: unknown;
+    columnsResultRows: QueryResultRow[];
+    enumLabelsByOid: Record<number, string[]>;
 }
 
 export class DataEditor {
@@ -75,7 +41,8 @@ export class DataEditor {
     private readonly initializedPanels = new Set<vscode.WebviewPanel>();
     private readonly panelState = new Map<vscode.WebviewPanel, PanelState>();
     private paginationSize = 100;
-    private batchMode = true;
+    // Cache schema/enum metadata keyed by panel key (connection:schema.table)
+    private schemaCache: Map<string, CachedSchemaMetadata> = new Map();
 
     constructor(context: vscode.ExtensionContext, connectionManager: ConnectionManager) {
         this.context = context;
@@ -115,7 +82,11 @@ export class DataEditor {
         this.panels.set(panelKey, panel);
         this.panelState.set(panel, this.createDefaultPanelState());
 
-        const messageDisposable = panel.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
+        const messageDisposable = panel.webview.onDidReceiveMessage(async (message: WebviewToExtensionMessage | unknown) => {
+            if (!isWebviewToExtension(message)) {
+                vscode.window.showErrorMessage('Invalid webview message received');
+                return;
+            }
             await this.handleMessage(message, panel, connectionId, schemaName, tableName);
         });
         this.context.subscriptions.push(messageDisposable);
@@ -125,6 +96,8 @@ export class DataEditor {
             this.panels.delete(panelKey);
             this.initializedPanels.delete(panel);
             this.panelState.delete(panel);
+            // Remove cached schema metadata for this panel to free memory
+            this.schemaCache.delete(panelKey);
         });
 
         await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
@@ -195,19 +168,114 @@ export class DataEditor {
         this.connectionManager.markBusy(connectionId);
 
         try {
-            const columnsResult = await client.query(
-                `SELECT column_name, data_type, is_nullable
-                 FROM information_schema.columns
-                 WHERE table_schema = $1 AND table_name = $2
-                 ORDER BY ordinal_position`,
-                [schemaName, tableName]
-            );
+            const cacheKey = `${connectionId}:${schemaName}.${tableName}`;
+            let cached = this.schemaCache.get(cacheKey);
+            let columns: ColumnInfo[] = [];
+            let columnsResultRows: any[] = [];
+            let enumLabelsByOid: Record<number, string[]> = {};
+            if (cached) {
+                ({ columns, columnsResultRows, enumLabelsByOid } = cached);
+            } else {
+                // Fetch typed column information including type OIDs so we can
+                // detect enums and array element types accurately.
+                const columnsResult = await client.query(
+                    `SELECT a.attname AS column_name,
+                            pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+                            NOT a.attnotnull AS is_nullable,
+                            t.oid AS typoid,
+                            t.typname AS typname,
+                            t.typtype AS typtype,
+                            t.typelem AS typelem
+                     FROM pg_attribute a
+                     JOIN pg_class c ON a.attrelid = c.oid
+                     JOIN pg_namespace n ON c.relnamespace = n.oid
+                     JOIN pg_type t ON a.atttypid = t.oid
+                     WHERE n.nspname = $1
+                       AND c.relname = $2
+                       AND a.attnum > 0
+                       AND NOT a.attisdropped
+                     ORDER BY a.attnum;`,
+                    [schemaName, tableName]
+                );
 
-            const columns: ColumnInfo[] = columnsResult.rows.map(row => ({
-                name: row.column_name,
-                type: row.data_type,
-                nullable: row.is_nullable === 'YES'
-            }));
+                // Map basic column metadata and collect candidate type OIDs for
+                // additional inspection (enums & element types).
+                const candidateTypeOids: number[] = [];
+                for (const r of columnsResult.rows) {
+                    const typoid = Number(r.typoid) || 0;
+                    const typelem = Number(r.typelem) || 0;
+                    if (typoid) candidateTypeOids.push(typoid);
+                    if (typelem) candidateTypeOids.push(typelem);
+                    columns.push({
+                        name: r.column_name,
+                        type: r.data_type,
+                        nullable: Boolean(r.is_nullable)
+                    });
+                    columnsResultRows.push(r);
+                }
+
+                // Deduplicate OIDs
+                const uniqueTypeOids = Array.from(new Set(candidateTypeOids));
+
+                // Fetch type metadata for the collected type OIDs so we can detect
+                // which are enum types and which are array element types.
+                const typeInfoMap: Record<number, { typname: string; typtype: string; typelem: number; oid: number }> = {};
+                if (uniqueTypeOids.length > 0) {
+                    const typeRows = await client.query(
+                        `SELECT oid, typname, typtype, typelem FROM pg_type WHERE oid = ANY($1::oid[])`,
+                        [uniqueTypeOids]
+                    );
+                    for (const tr of typeRows.rows) {
+                        typeInfoMap[Number(tr.oid)] = {
+                            typname: tr.typname,
+                            typtype: tr.typtype,
+                            typelem: Number(tr.typelem) || 0,
+                            oid: Number(tr.oid)
+                        };
+                    }
+                }
+
+                // Identify enum type OIDs to fetch their labels
+                const enumTypeOids: number[] = [];
+                for (const oidStr of Object.keys(typeInfoMap)) {
+                    const oid = Number(oidStr);
+                    const info = typeInfoMap[oid];
+                    if (info && info.typtype === 'e') {
+                        enumTypeOids.push(oid);
+                    }
+                }
+
+                // Also check array element types referenced by columns for enum element types
+                for (const colRow of columnsResult.rows) {
+                    const elemOid = Number(colRow.typelem) || 0;
+                    if (elemOid && typeInfoMap[elemOid] && typeInfoMap[elemOid].typtype === 'e') {
+                        if (!enumTypeOids.includes(elemOid)) {
+                            enumTypeOids.push(elemOid);
+                        }
+                    }
+                }
+
+                // Fetch enum labels grouped by enum type oid
+                if (enumTypeOids.length > 0) {
+                    const enumRows = await client.query(
+                        `SELECT enumtypid::oid AS enumtypid, enumlabel
+                         FROM pg_enum
+                         WHERE enumtypid = ANY($1::oid[])
+                         ORDER BY enumtypid, enumsortorder`,
+                        [enumTypeOids]
+                    );
+                    for (const er of enumRows.rows) {
+                        const typ = Number(er.enumtypid);
+                        enumLabelsByOid[typ] = enumLabelsByOid[typ] || [];
+                        enumLabelsByOid[typ].push(String(er.enumlabel));
+                    }
+                }
+
+                // Attach enum labels to matching columns and cache
+                applyEnumLabelsToColumns(columns, columnsResultRows, enumLabelsByOid);
+                cached = { columns, columnsResultRows, enumLabelsByOid };
+                this.schemaCache.set(cacheKey, cached);
+            }
 
             const pkResult = await client.query(
                 `SELECT a.attname
@@ -220,6 +288,80 @@ export class DataEditor {
             const primaryKey: PrimaryKeyInfo = {
                 columns: pkResult.rows.map(row => row.attname)
             };
+
+            // Fetch unique constraints
+            const uniqueResult = await client.query(
+                `SELECT a.attname
+                 FROM pg_constraint c
+                 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+                 JOIN pg_class t ON t.oid = c.conrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 WHERE t.relname = $1 AND n.nspname = $2 AND c.contype = 'u'`,
+                [tableName, schemaName || 'public']
+            );
+            const uniqueColumns = new Set(uniqueResult.rows.map(row => row.attname));
+
+            // Fetch indexed columns
+            const indexResult = await client.query(
+                `SELECT DISTINCT a.attname
+                 FROM pg_index i
+                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                 JOIN pg_class t ON t.oid = i.indrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 WHERE t.relname = $1 AND n.nspname = $2 AND NOT i.indisprimary`,
+                [tableName, schemaName || 'public']
+            );
+            const indexedColumns = new Set(indexResult.rows.map(row => row.attname));
+
+            // Fetch foreign key information using a simpler, more reliable query
+            const fkResult = await client.query(
+                `SELECT DISTINCT ON (c.oid, a.attnum)
+                    a.attname as column_name,
+                    t2.relname as referenced_table,
+                    n2.nspname as referenced_schema,
+                    a2.attname as referenced_column
+                 FROM pg_constraint c
+                 JOIN pg_class t ON t.oid = c.conrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 JOIN pg_class t2 ON t2.oid = c.confrelid
+                 JOIN pg_namespace n2 ON n2.oid = t2.relnamespace
+                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+                 JOIN pg_attribute a2 ON a2.attrelid = t2.oid AND a2.attnum = ANY(c.confkey)
+                 WHERE t.relname = $1 
+                   AND n.nspname = $2 
+                   AND c.contype = 'f'`,
+                [tableName, schemaName || 'public']
+            );
+            console.log(`[DataEditor] FK query returned ${fkResult.rows.length} rows for ${schemaName}.${tableName}`);
+            const foreignKeys: Record<string, { referencedSchema: string; referencedTable: string; referencedColumn: string }> = {};
+            for (const row of fkResult.rows) {
+                console.log(`[DataEditor] FK found: ${row.column_name} -> ${row.referenced_schema}.${row.referenced_table}.${row.referenced_column}`);
+                foreignKeys[row.column_name] = {
+                    referencedSchema: row.referenced_schema,
+                    referencedTable: row.referenced_table,
+                    referencedColumn: row.referenced_column
+                };
+            }
+            console.log(`[DataEditor] Final FK map:`, Object.keys(foreignKeys));
+
+            // Enrich columns with constraint and index information
+            columns = columns.map(col => {
+                const enriched = {
+                    ...col,
+                    isUnique: uniqueColumns.has(col.name),
+                    isIndexed: indexedColumns.has(col.name),
+                    foreignKey: foreignKeys[col.name]
+                };
+                if (col.name === 'conversation_id') {
+                    console.log(`[DataEditor] Enriching conversation_id:`, enriched.foreignKey);
+                }
+                return enriched;
+            });
+
+            // UPDATE CACHE with enriched columns so loadForeignKeyRows finds them
+            cached = { columns, columnsResultRows, enumLabelsByOid };
+            this.schemaCache.set(cacheKey, cached);
+            console.log(`[DataEditor] Updated cache with enriched columns`);
 
             const offset = state.page * this.paginationSize;
             const qualifiedTable = `${this.quoteIdentifier(schemaName)}.${this.quoteIdentifier(tableName)}`;
@@ -246,24 +388,83 @@ export class DataEditor {
             const dataValues = [...values, this.paginationSize, offset];
             const dataResult = await client.query(dataQuery, dataValues);
 
+            // Normalize returned values for JSON, arrays and enums so the
+            // webview receives JS-native types (objects/arrays) rather than
+            // Postgres textual representations.
+            const normalizedRows: Record<string, unknown>[] = dataResult.rows.map((row: any) => {
+                const copy: Record<string, unknown> = { ...row };
+                for (const col of columns) {
+                    const raw = row[col.name];
+                    try {
+                        // JSON / JSONB: ensure JS objects rather than raw strings
+                        if (col.type === 'json' || col.type === 'jsonb') {
+                            if (typeof raw === 'string') {
+                                try {
+                                    copy[col.name] = JSON.parse(raw);
+                                } catch {
+                                    copy[col.name] = raw;
+                                }
+                            } else {
+                                copy[col.name] = raw;
+                            }
+                            continue;
+                        }
+
+                        // Array types: attempt to convert Postgres array literals
+                        // into JS arrays if driver returned them as strings.
+                        if (String(col.type).endsWith('[]')) {
+                            if (Array.isArray(raw)) {
+                                copy[col.name] = raw;
+                                continue;
+                            }
+                            if (typeof raw === 'string') {
+                                try {
+                                    const parsed = JSON.parse(raw);
+                                    if (Array.isArray(parsed)) {
+                                        copy[col.name] = parsed;
+                                        continue;
+                                    }
+                                } catch {
+                                    // fall through to Postgres literal parser
+                                }
+                                // Use centralized parser
+                                copy[col.name] = parsePostgresArrayLiteral(raw, col.type);
+                                continue;
+                            }
+                        }
+
+                        // Enums are returned as strings already; leave as-is.
+                        copy[col.name] = raw;
+                    } catch (err) {
+                        // Best-effort: leave original raw value if any conversion fails
+                        copy[col.name] = raw;
+                    }
+                }
+                return copy;
+            });
+
             const countQuery = `SELECT COUNT(*)::int AS total FROM ${qualifiedTable}${whereClause ? ` ${whereClause}` : ''}`;
             const countResult = await client.query(countQuery, values);
 
             const totalRows: number = countResult.rows[0]?.total ?? dataResult.rowCount ?? 0;
+
+            const prefs = await this.loadTablePreferences(schemaName, tableName);
 
             return {
                 schemaName,
                 tableName,
                 columns,
                 primaryKey,
-                rows: dataResult.rows,
+                // Return normalized rows (JSON/arrays/enums converted) so the
+                // webview always receives JS-native types rather than raw driver values.
+                rows: normalizedRows,
                 currentPage: state.page,
                 totalRows,
                 paginationSize: this.paginationSize,
-                batchMode: this.batchMode,
                 sort: state.sort,
                 filters: state.filters,
-                searchTerm: state.searchTerm
+                searchTerm: state.searchTerm,
+                tablePreferences: prefs
             };
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load table data: ${error}`);
@@ -274,90 +475,141 @@ export class DataEditor {
     }
 
     private async handleMessage(
-        message: WebviewMessage,
+        message: WebviewToExtensionMessage,
         panel: vscode.WebviewPanel,
         connectionId: string,
         schemaName: string,
         tableName: string
     ): Promise<void> {
-        if (!message || typeof message !== 'object') {
-            return;
-        }
-
-        const { command, payload } = message;
-
-        switch (command) {
-            case 'loadPage': {
-                const page = Math.max(0, Number((payload as { page?: number })?.page ?? 0));
-                await this.loadTableData(panel, connectionId, schemaName, tableName, page);
-                break;
-            }
-            case 'executeChanges': {
-                const changes = Array.isArray((payload as { changes?: GridChange[] })?.changes)
-                    ? (payload as { changes?: GridChange[] }).changes ?? []
-                    : [];
-                const batchMode = Boolean((payload as { batchMode?: boolean })?.batchMode);
-                await this.executeChanges(
-                    panel,
-                    connectionId,
-                    schemaName,
-                    tableName,
-                    changes,
-                    batchMode
-                );
-                break;
-            }
-            case 'previewSql': {
-                const changes = Array.isArray((payload as { changes?: GridChange[] })?.changes)
-                    ? (payload as { changes?: GridChange[] }).changes ?? []
-                    : [];
-                await this.previewSql(
-                    panel,
-                    schemaName,
-                    tableName,
-                    changes
-                );
-                break;
-            }
-            case 'search': {
-                const state = this.getPanelState(panel);
-                const rawTerm = typeof (payload as { searchTerm?: unknown })?.searchTerm === 'string'
-                    ? (payload as { searchTerm?: string }).searchTerm
-                    : '';
-                state.searchTerm = rawTerm ?? '';
-                state.page = 0;
-                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
-                break;
-            }
-            case 'applySort': {
-                const nextSort = (payload as { sort?: SortDescriptor | null })?.sort ?? null;
-                const state = this.getPanelState(panel);
-                state.sort = nextSort && nextSort.column && nextSort.direction ? nextSort : null;
-                state.page = 0;
-                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
-                break;
-            }
-            case 'applyFilters': {
-                const incoming = (payload as { filters?: FilterMap })?.filters ?? {};
-                const normalized: FilterMap = {};
-                for (const [key, value] of Object.entries(incoming)) {
-                    if (typeof value === 'string') {
-                        normalized[key] = value;
-                    }
+        try {
+            switch (message.command) {
+                case 'loadPage': {
+                    const page = Math.max(0, Number(message.pageNumber ?? 0));
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, page);
+                    break;
                 }
-                const state = this.getPanelState(panel);
-                state.filters = normalized;
-                state.page = 0;
-                await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
-                break;
+                case 'executeChanges': {
+                    const changes = Array.isArray(message.changes) ? message.changes : [];
+                    const batchMode = Boolean(message.batchMode);
+                    const bypassValidation = Boolean(message.bypassValidation);
+                    await this.executeChanges(
+                        panel,
+                        connectionId,
+                        schemaName,
+                        tableName,
+                        changes,
+                        batchMode,
+                        bypassValidation
+                    );
+                    break;
+                }
+                case 'previewChanges': {
+                    const changes = Array.isArray(message.changes) ? message.changes : [];
+                    await this.previewSql(
+                        panel,
+                        schemaName,
+                        tableName,
+                        changes
+                    );
+                    break;
+                }
+                case 'search': {
+                    const state = this.getPanelState(panel);
+                    const rawTerm = typeof message.term === 'string' ? message.term : '';
+                    state.searchTerm = rawTerm ?? '';
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'applySort': {
+                    const nextSort = message.sort ?? null;
+                    const state = this.getPanelState(panel);
+                    state.sort = nextSort && nextSort.column && nextSort.direction ? nextSort : null;
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'applyFilters': {
+                    const incoming = message.filters ?? {};
+                    const normalized: FilterMap = {};
+                    for (const [key, value] of Object.entries(incoming)) {
+                        if (typeof value === 'string') {
+                            normalized[key] = value;
+                        }
+                    }
+                    const state = this.getPanelState(panel);
+                    state.filters = normalized;
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'applyFilters': {
+                    const incoming = message.filters ?? {};
+                    const normalized: FilterMap = {};
+                    for (const [key, value] of Object.entries(incoming)) {
+                        if (typeof value === 'string') {
+                            normalized[key] = value;
+                        }
+                    }
+                    const state = this.getPanelState(panel);
+                    state.filters = normalized;
+                    state.page = 0;
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'refresh': {
+                    const state = this.getPanelState(panel);
+                    await this.loadTableData(panel, connectionId, schemaName, tableName, state.page);
+                    break;
+                }
+                case 'saveTablePreferences': {
+                    const prefs = message.prefs ?? {};
+                    await this.saveTablePreferences(panel, schemaName, tableName, prefs);
+                    break;
+                }
+                case 'resetTablePreferences': {
+                    await this.resetTablePreferences(panel, schemaName, tableName);
+                    break;
+                }
+                case 'openIndexManager': {
+                    // Open the index manager for this table
+                    const indexManagerView = new IndexManagerView(this.context, this.connectionManager);
+                    const mockItem: Partial<DatabaseTreeItem> = {
+                        connectionId,
+                        schemaName,
+                        tableName,
+                        type: 'table'
+                    };
+                    await indexManagerView.openIndexManager(mockItem as DatabaseTreeItem);
+                    break;
+                }
+                case 'loadForeignKeyRows': {
+                    // Load rows from the foreign key referenced table
+                    console.log(`[DataEditor] Received loadForeignKeyRows for ${schemaName}.${tableName}.${message.columnName}`);
+                    await this.loadForeignKeyRows(panel, connectionId, schemaName, tableName, message.columnName);
+                    break;
+                }
+                case 'copyToSqlTerminal': {
+                    // Copy SQL to clipboard
+                    const sql = typeof message.sql === 'string' ? message.sql : '';
+                    if (sql) {
+                        await vscode.env.clipboard.writeText(sql);
+                        vscode.window.showInformationMessage('SQL copied to clipboard');
+                    }
+                    break;
+                }
             }
-            case 'refresh': {
-                const state = this.getPanelState(panel);
-                await this.loadTableData(panel, connectionId, schemaName, tableName, state.page);
-                break;
-            }
-            default:
-                break;
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            const errorInfo = {
+                message: errorMsg,
+                stack: error instanceof Error ? error.stack : undefined
+            };
+            const webviewError: ExtensionToWebviewMessage = {
+                command: 'webviewError',
+                error: errorInfo
+            };
+            panel.webview.postMessage(webviewError);
         }
     }
 
@@ -367,10 +619,9 @@ export class DataEditor {
         schemaName: string,
         tableName: string,
         changes: GridChange[],
-        batchMode: boolean
+        batchMode: boolean,
+        bypassValidation: boolean = false
     ): Promise<void> {
-        this.batchMode = batchMode;
-
         const client = await this.connectionManager.getClient(connectionId);
         if (!client) {
             panel.webview.postMessage({ command: 'executionComplete', success: false, error: 'No connection available' });
@@ -383,31 +634,56 @@ export class DataEditor {
             return;
         }
 
+        // Perform server-side validation to guard against obvious
+        // client-side bypasses (e.g. non-numeric values for numeric columns)
+        // unless the user explicitly requested to bypass validation.
+        if (!bypassValidation) {
+            try {
+                const { validateChangesAgainstSchema } = await import('./sqlValidator');
+                // Use cached schema metadata when possible to speed up validation.
+                const cacheKey = `${connectionId}:${schemaName}.${tableName}`;
+                const cached = this.schemaCache.get(cacheKey);
+                let validationErrors: string[] = [];
+                if (cached) {
+                    // If cached, the validator can rely on the provided client but
+                    // may avoid querying type OIDs for enums; pass through as normal
+                    validationErrors = await validateChangesAgainstSchema(client, schemaName, tableName, changes);
+                } else {
+                    validationErrors = await validateChangesAgainstSchema(client, schemaName, tableName, changes);
+                }
+                if (validationErrors.length > 0) {
+                    const message = `Validation failed:\n${validationErrors.join('\n')}`;
+                    panel.webview.postMessage({ command: 'executionComplete', success: false, error: message });
+                    return;
+                }
+            } catch (validationErr) {
+                // If validation infrastructure fails, surface a readable error
+                const m = validationErr instanceof Error ? validationErr.message : String(validationErr);
+                panel.webview.postMessage({ command: 'executionComplete', success: false, error: `Validation step failed: ${m}` });
+                return;
+            }
+        }
+
         this.connectionManager.markBusy(connectionId);
 
         try {
-            if (batchMode) {
-                await client.query('BEGIN');
-            }
+            // Always use batch mode (transactions) for data safety
+            await client.query('BEGIN');
 
             for (const change of changes) {
                 const sql = SqlGenerator.generateSql(schemaName, tableName, change);
                 await client.query(sql.query, sql.values);
             }
 
-            if (batchMode) {
-                await client.query('COMMIT');
-            }
+            await client.query('COMMIT');
 
             panel.webview.postMessage({ command: 'executionComplete', success: true });
             await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
         } catch (error) {
-            if (batchMode) {
-                try {
-                    await client.query('ROLLBACK');
-                } catch (rollbackError) {
-                    console.error('Failed to rollback transaction', rollbackError);
-                }
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Failed to rollback transaction', rollbackError);
             }
             const errorMessage = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Failed to execute changes: ${errorMessage}`);
@@ -428,15 +704,60 @@ export class DataEditor {
             return;
         }
 
-        const statements = changes.map(change => {
-            const sql = SqlGenerator.generateSql(schemaName, tableName, change);
-            return SqlGenerator.formatSqlWithValues(sql.query, sql.values);
-        });
+        let payload: string;
+        try {
+            const statements = changes.map(change => {
+                const sql = SqlGenerator.generateSql(schemaName, tableName, change);
+                const formatted = this.formatSqlForDisplay(sql.query);
+                return SqlGenerator.formatSqlWithValues(formatted, sql.values);
+            });
+            payload = statements.join(';\n\n');
+        } catch (err) {
+            payload = `/* Failed to generate SQL: ${err instanceof Error ? err.message : String(err)} */`;
+        }
 
-        panel.webview.postMessage({
-            command: 'sqlPreview',
-            payload: statements.join(';\n\n')
-        });
+    const isError = typeof payload === 'string' && payload.startsWith('/* Failed to generate SQL');
+    panel.webview.postMessage({ command: 'sqlPreview', payload, error: isError });
+    }
+
+    private formatSqlForDisplay(query: string): string {
+        // Format SQL with proper indentation for readability in preview
+        // INSERT INTO ... (\n  ...\n) VALUES (\n  ...\n)
+        // UPDATE ... SET\n  ...\nWHERE\n  ...
+        // DELETE FROM ... WHERE\n  ...
+        
+        let formatted = query;
+        
+        // Format INSERT
+        formatted = formatted.replace(
+            /INSERT INTO (\S+) \(([^)]+)\) VALUES \(([^)]+)\)/i,
+            (match, table, cols, vals) => {
+                return `INSERT INTO ${table}\n  (${cols})\nVALUES\n  (${vals})`;
+            }
+        );
+        
+        // Format UPDATE with SET and WHERE
+        formatted = formatted.replace(
+            /UPDATE (\S+) SET (.+) WHERE (.+)/i,
+            (match, table, setClauses, whereClause) => {
+                // Split SET clauses by comma
+                const sets = setClauses.split(',').map((s: string) => s.trim()).join(',\n  ');
+                // Split WHERE clauses by AND
+                const wheres = whereClause.split(' AND ').map((w: string) => w.trim()).join('\n  AND ');
+                return `UPDATE ${table}\nSET\n  ${sets}\nWHERE\n  ${wheres}`;
+            }
+        );
+        
+        // Format DELETE with WHERE
+        formatted = formatted.replace(
+            /DELETE FROM (\S+) WHERE (.+)/i,
+            (match, table, whereClause) => {
+                const wheres = whereClause.split(' AND ').map((w: string) => w.trim()).join('\n  AND ');
+                return `DELETE FROM ${table}\nWHERE\n  ${wheres}`;
+            }
+        );
+        
+        return formatted;
     }
 
     private buildWebviewHtml(webview: vscode.Webview, state: TableStatePayload): string {
@@ -444,7 +765,7 @@ export class DataEditor {
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'data-editor', 'main.js')
         );
         const baseStyleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'index.css')
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css')
         );
         const appStyleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css')
@@ -519,4 +840,142 @@ export class DataEditor {
         const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
         return Array.from({ length: 32 }, () => possible.charAt(Math.floor(Math.random() * possible.length))).join('');
     }
+
+    /**
+     * Basic Postgres array literal parser. Converts strings like
+     * '{a,b,"c,d",NULL}' into JS arrays. This is intentionally
+     * lightweight and aimed at common use-cases (text/number arrays).
+     */
+    // parsePostgresArrayLiteral and castArrayElement moved to src/pgUtils.ts
+
+    // New message handlers for table preferences
+    private async saveTablePreferences(panel: vscode.WebviewPanel, schemaName: string, tableName: string, prefs: any) {
+        // Persist preferences into globalState keyed by table identifier
+        const key = `tablePrefs:${schemaName}.${tableName}`;
+        try {
+            await this.context.globalState.update(key, prefs);
+            panel.webview.postMessage({ command: 'saveTablePreferencesResult', payload: { success: true } });
+        } catch (err) {
+            panel.webview.postMessage({ command: 'saveTablePreferencesResult', payload: { success: false, error: String(err) } });
+        }
+    }
+
+    private async loadTablePreferences(schemaName: string, tableName: string) {
+        const key = `tablePrefs:${schemaName}.${tableName}`;
+        return this.context.globalState.get<any>(key, {});
+}
+
+    private async resetTablePreferences(panel: vscode.WebviewPanel, schemaName: string, tableName: string) {
+        const key = `tablePrefs:${schemaName}.${tableName}`;
+        try {
+            await this.context.globalState.update(key, undefined);
+            panel.webview.postMessage({ command: 'resetTablePreferencesResult', payload: { success: true } });
+        } catch (err) {
+            panel.webview.postMessage({ command: 'resetTablePreferencesResult', payload: { success: false, error: String(err) } });
+        }
+    }
+
+    private async loadForeignKeyRows(
+        panel: vscode.WebviewPanel,
+        connectionId: string,
+        schemaName: string,
+        tableName: string,
+        columnName: string
+    ): Promise<void> {
+        console.log(`[DataEditor] loadForeignKeyRows called for ${schemaName}.${tableName}.${columnName}`);
+        try {
+            const client = await this.connectionManager.getClient(connectionId);
+            if (!client) {
+                console.log('[DataEditor] No client available');
+                panel.webview.postMessage({
+                    command: 'webviewError',
+                    error: { message: 'No active connection available' }
+                });
+                return;
+            }
+
+            this.connectionManager.markBusy(connectionId);
+
+            // First, get the column info to find the FK reference
+            const cacheKey = `${connectionId}:${schemaName}.${tableName}`;
+            console.log(`[DataEditor] Looking for cache key: ${cacheKey}`);
+            const cached = this.schemaCache.get(cacheKey);
+            let column: ColumnInfo | undefined;
+
+            if (cached) {
+                console.log(`[DataEditor] Cache found, searching for column ${columnName}`);
+                column = cached.columns.find(c => c.name === columnName);
+                console.log(`[DataEditor] Column found:`, column ? 'yes' : 'no', column?.foreignKey);
+            } else {
+                // If not cached, we need to look it up
+                // For now, just return an error
+                console.log('[DataEditor] Cache not found for key:', cacheKey);
+                console.log('[DataEditor] Available cache keys:', Array.from(this.schemaCache.keys()));
+                panel.webview.postMessage({
+                    command: 'webviewError',
+                    error: { message: 'Column information not available' }
+                });
+                return;
+            }
+
+            if (!column || !column.foreignKey) {
+                console.log('[DataEditor] Column is not a foreign key or column not found');
+                panel.webview.postMessage({
+                    command: 'webviewError',
+                    error: { message: 'Column is not a foreign key' }
+                });
+                return;
+            }
+
+            const { referencedSchema, referencedTable, referencedColumn } = column.foreignKey;
+            console.log(`[DataEditor] FK references: ${referencedSchema}.${referencedTable}.${referencedColumn}`);
+
+            // Query the referenced table to get rows (limit to 1000 for performance)
+            const quotedSchema = `"${referencedSchema}"`;
+            const quotedTable = `"${referencedTable}"`;
+            const query = `SELECT * FROM ${quotedSchema}.${quotedTable} LIMIT 1000`;
+            console.log(`[DataEditor] Executing query: ${query}`);
+
+            const result = await client.query(query);
+            const rows = result.rows || [];
+            console.log(`[DataEditor] Query returned ${rows.length} rows`);
+
+            // Find the primary key of the referenced table to return it
+            const pkResult = await client.query(
+                `SELECT a.attname
+                 FROM pg_index i
+                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                 JOIN pg_class t ON t.oid = i.indrelid
+                 JOIN pg_class idx ON idx.oid = i.indexrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 WHERE n.nspname = $1 AND t.relname = $2 AND i.indisprimary
+                 ORDER BY a.attnum`,
+                [referencedSchema, referencedTable]
+            );
+
+            let pkColumn = referencedColumn;
+            if (pkResult.rows && pkResult.rows.length > 0) {
+                pkColumn = (pkResult.rows[0] as any).attname;
+            }
+            console.log(`[DataEditor] Using PK column: ${pkColumn}`);
+
+            console.log('[DataEditor] Sending foreignKeyRows message to webview');
+            panel.webview.postMessage({
+                command: 'foreignKeyRows',
+                rows,
+                pkColumn
+            });
+
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.log('[DataEditor] Error loading FK rows:', errorMsg);
+            panel.webview.postMessage({
+                command: 'webviewError',
+                error: { message: `Failed to load foreign key rows: ${errorMsg}` }
+            });
+        } finally {
+            this.connectionManager.markIdle(connectionId);
+        }
+    }
+
 }

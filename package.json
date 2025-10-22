@@ -2,12 +2,12 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "1.0.100",
+  "version": "2.0.25",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
     "type": "git",
-    "url": "git@github.com:waltmoorhouse/postgresheets.git"
+    "url": "https://github.com/waltmoorhouse/postgresheets.git"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -15,9 +15,7 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onView:postgresExplorer"
-  ],
+  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -70,9 +68,21 @@
         "category": "PostgreSQL"
       },
       {
+        "command": "postgres-editor.cancelConnect",
+        "title": "Cancel Connect",
+        "icon": "$(debug-stop)",
+        "category": "PostgreSQL"
+      },
+      {
         "command": "postgres-editor.createTable",
         "title": "Create Table",
         "icon": "$(diff-added)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.cancelAllConnects",
+        "title": "Cancel All Connects",
+        "icon": "$(debug-stop)",
         "category": "PostgreSQL"
       },
       {
@@ -85,6 +95,54 @@
         "command": "postgres-editor.dropTable",
         "title": "Drop Table",
         "icon": "$(trash)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.exportTableAsCSV",
+        "title": "Export as CSV",
+        "icon": "$(export)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.importTableFromCSV",
+        "title": "Import from CSV",
+        "icon": "$(import)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.manageIndexes",
+        "title": "Manage Indexes",
+        "icon": "$(list-tree)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.managePermissions",
+        "title": "Manage Permissions",
+        "icon": "$(lock)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.openSqlTerminal",
+        "title": "Open SQL Terminal",
+        "icon": "$(terminal)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.viewQueryHistory",
+        "title": "View Query History",
+        "icon": "$(history)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.clearQueryHistory",
+        "title": "Clear Query History",
+        "icon": "$(trash)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.refreshQueryHistory",
+        "title": "Refresh Query History",
+        "icon": "$(refresh)",
         "category": "PostgreSQL"
       }
     ],
@@ -104,6 +162,14 @@
           "name": "Connections",
           "icon": "$(database)"
         }
+      ],
+      "panel": [
+        {
+          "type": "webview",
+          "id": "postgresQueryHistory",
+          "name": "Query History",
+          "icon": "$(history)"
+        }
       ]
     },
     "menus": {
@@ -117,6 +183,16 @@
           "command": "postgres-editor.refreshExplorer",
           "when": "view == postgresExplorer",
           "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.cancelAllConnects",
+          "when": "view == postgresExplorer && postgresHasConnecting",
+          "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.refreshQueryHistory",
+          "when": "view == postgresQueryHistory",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -128,6 +204,11 @@
         {
           "command": "postgres-editor.disconnect",
           "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy || viewItem == connection.connecting)",
+          "group": "inline@1"
+        },
+        {
+          "command": "postgres-editor.cancelConnect",
+          "when": "view == postgresExplorer && viewItem == connection.connecting",
           "group": "inline@1"
         },
         {
@@ -159,6 +240,31 @@
           "command": "postgres-editor.dropTable",
           "when": "view == postgresExplorer && viewItem == table",
           "group": "inline"
+        },
+        {
+          "command": "postgres-editor.exportTableAsCSV",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "1_table@1"
+        },
+        {
+          "command": "postgres-editor.importTableFromCSV",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "1_table@2"
+        },
+        {
+          "command": "postgres-editor.manageIndexes",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "postgres-editor.managePermissions",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "postgres-editor.openSqlTerminal",
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy)",
+          "group": "3_terminal@1"
         }
       ]
     },
@@ -184,34 +290,37 @@
     "vscode:prepublish": "npm run build:webview && rm -rf out && npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "jest",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --config=jest.config.cjs",
+  "test:components": "jest --testPathPatterns='./test/.*\\.(spec|test)\\.(ts|js)$'",
+    "test:prepare-webview": "npm ci --prefix webview",
+  "test:components:ci": "npm run test:prepare-webview && node --experimental-vm-modules node_modules/.bin/jest --config=jest.config.cjs --testPathPatterns='./test/.*\\.(spec|test)\\.(ts|js)$'",
     "dev:webview": "npm --prefix webview run dev",
     "build:webview": "npm --prefix webview run build",
     "check:webview": "npm --prefix webview run check"
   },
   "devDependencies": {
+    "@babel/core": "^7.22.0",
+    "@babel/preset-env": "^7.22.0",
+    "@testing-library/jest-dom": "^5.16.5",
+    "@testing-library/svelte": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.x",
     "@types/pg": "^8.15.5",
     "@types/vscode": "^1.80.0",
+    "babel-jest": "^30.2.0",
     "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "jest-mock-fs": "^1.0.2",
+    "svelte": "^4.2.20",
+    "svelte-focus-trap": "^1.2.0",
+    "svelte-jester": "^5.0.0",
+    "svelte-preprocess": "^6.0.3",
     "ts-jest": "^29.4.4",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
-    "vsce": "^1.97.0"
+    "vsce": "^2.15.0"
   },
   "dependencies": {
     "pg": "^8.11.0"
-  },
-  "jest": {
-    "transform": {
-      "^.+\\.tsx?$": "ts-jest"
-    },
-    "testEnvironment": "node",
-    "testPathIgnorePatterns": [
-      "/node_modules/",
-      "/out/",
-      "/test/integration/"
-    ]
   }
 }

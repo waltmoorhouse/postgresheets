@@ -2,33 +2,50 @@
 
 ## Current Known Issues
 
+### Colored Circles Not Good For Colorblind Users
+**Issue:** Connection status in the tree used small colored circle indicators (🟢/🔴) which relied on color alone to convey state and were difficult for colorblind users to distinguish.
+
+**Fix:** The tree view now uses a shape glyph plus short textual label for connection statuses (e.g. "✔ Connected", "✖ Disconnected", "⏳ Connecting"). The icon itself was kept as the standard database glyph and the status glyph/text is included in the item's description so it remains visible regardless of theme or color perception.
+
+**Impact:**
+- Colorblind users see a clear glyph (check/X/gear/hourglass) and short text which does not rely solely on color.
+- Tooltips include an explicit plain-text status label for screen readers and clarity.
+
+**Priority:** High (Accessibility improvement)
+
+**Status:** Fixed
+
 ### Limited Array Type Support
+**Issue (Resolved):** PostgreSQL array types (e.g., `TEXT[]`, `INTEGER[]`) used to be displayed as raw JSON/text in the grid which made editing awkward and indistinguishable from other string values.
 
-**Issue:** PostgreSQL array types (e.g., `TEXT[]`, `INTEGER[]`) are displayed as JSON strings in the data grid.
+**Fix:** The data editor now normalizes PostgreSQL array values into native JavaScript arrays before sending payloads to the webview. Arrays are presented in the grid using a compact JSON-like preview and can be edited in the modal JSON editor (open the cell's JSON editor to view/modify array contents). The extension also attempts to parse common driver-returned representations (JSON-like strings and PostgreSQL array literals).
 
-**Impact:** 
-- Arrays cannot be edited directly in grid
-- Visual distinction between arrays and other JSON types is unclear
+**Impact (now):**
+- Arrays are shown as JSON arrays (e.g. ["a","b"]) in the grid preview.
+- Arrays can be edited via the JSON editor modal; changes are converted back into native arrays before execution.
+- Parsing is best-effort for textual representations; very exotic array encodings may still require manual SQL.
 
-**Workaround:** Use manual SQL to update array columns.
+**Workaround (deprecated):** Manual SQL is no longer required for many common array edits, but remains an option for complex/edge-case array manipulations.
 
-**Priority:** Low
+**Priority:** Medium
 
-**Status:** Accepted limitation for current version
+**Status:** Fixed (see notes/caveats)
 
 ### Custom Enum Type Display
+**Issue (Resolved):** Custom ENUM types were displayed as plain strings with no indication of the valid labels.
 
-**Issue:** Custom ENUM types show as their string values without indication of valid options.
+**Fix:** The extension now detects enum-typed columns and retrieves their allowed labels from PostgreSQL (`pg_type` / `pg_enum`). Enum metadata is sent to the webview and the data grid renders a native select control for enum columns, preventing invalid inputs and improving discoverability.
 
-**Impact:** 
-- Users may enter invalid enum values
-- No autocomplete for valid enum values
+**Impact (now):**
+- Enum columns display a dropdown with valid labels when edited inline.
+- For array-of-enum columns the editor provides the enum's labels in the modal editor to make element editing easier.
+- Server-side enforcement still applies; invalid enum values will be rejected by PostgreSQL at execution time.
 
-**Workaround:** Refer to database schema for valid enum values.
+**Workaround (deprecated):** Manual lookup is no longer necessary to discover valid values for standard enum types.
 
-**Priority:** Low
+**Priority:** Low → Medium
 
-**Status:** Accepted limitation - may add in future version
+**Status:** Fixed
 
 ### Pagination Performance with Large Offsets
 
@@ -62,91 +79,120 @@
 
 ### High Priority
 
-1. **CSV Import/Export**
-   - Status: Not implemented
-   - Impact: Users must use external tools for bulk data operations
+1. **Query History** ✅ COMPLETED
+   - Status: Implemented
+   - Impact: Users can now review and re-run previous queries
+   - Features: Search history, copy to clipboard, persistent storage
+   - Access: Command palette → "Query History"
+
+2. **CSV Export** ✅ COMPLETED
+   - Status: Implemented  
+   - Impact: Users can export table data to CSV format
+   - Features: Optional headers, RFC 4180 compliant formatting, accessible file picker
+   - Access: Right-click table → "Export as CSV"
+
+3. **CSV Import** ✅ COMPLETED
+   - Status: Implemented
+   - Impact: Users can bulk-load data from CSV files with automatic type conversion
+   - Features: Auto-detection of headers, intelligent column mapping, type conversion (boolean, integer, float, date, timestamp, JSON, UUID), transaction-based import, 32 comprehensive tests
+   - Access: Right-click table → "Import from CSV"
+
+4. **Foreign Key Indicators and Mini-View** 🔄 PLANNED
+   - Status: Not yet implemented
+   - Impact: Users can see which columns are foreign keys and select valid values without opening related table in separate tab
+   - Planned Features:
+     - Visual FK icon indicator next to column name in header
+     - When editing FK column, display a mini-view/dropdown of the referenced table's rows
+     - Click to select a row and set its primary key as the FK value
+     - Reduces context switching and improves data entry workflow
    - Effort: Medium (2-3 days)
+   - Requirements: Fetch FK metadata from `information_schema.key_column_usage`, extend `ColumnInfo` interface, build mini-view component
 
-2. **Query History**
-   - Status: Not implemented
-   - Impact: Cannot review previous queries or changes
-   - Effort: Small (1 day)
+5. **Column Constraint Indicators (UNIQUE, INDEX)** 🔄 PLANNED
+   - Status: Not yet implemented
+   - Impact: Users can see which columns have UNIQUE constraints or indexes at a glance
+   - Planned Features:
+     - Visual icons next to column names in header
+     - Index icon clickable to open Index Manager (same as right-click → "Manage Indexes")
+     - Helps identify natural keys, indexed search columns, and performance-critical columns
+   - Effort: Medium (2-3 days)
+   - Requirements: Fetch constraint/index metadata from `pg_indexes` and `information_schema.key_column_usage`, extend `ColumnInfo` interface, add icon indicators to column headers
 
-3. **Connection Pooling Configuration**
+6. **Connection Pooling Configuration**
    - Status: Basic pooling exists but not configurable
    - Impact: Cannot tune for specific workloads
    - Effort: Small (1 day)
 
-4. **Infinite Scroll Option**
+5. **Infinite Scroll Option**
    - Status: Only pagination available
    - Impact: Extra clicks for large datasets
    - Effort: Medium (2-3 days)
 
 ### Medium Priority
 
-5. **ER Diagram View**
+6. **ER Diagram View**
    - Status: Not implemented
    - Impact: Must use external tools to visualize relationships
    - Effort: Large (1-2 weeks)
 
-6. **Visual Query Builder**
+7. **Visual Query Builder**
    - Status: Not implemented
    - Impact: Complex queries require SQL knowledge
    - Effort: Large (2-3 weeks)
 
-7. **Index Management UI**
+8. **Index Management UI**
    - Status: Not implemented
    - Impact: Must use manual SQL for index operations
    - Effort: Medium (3-5 days)
 
-8. **Database Backup/Restore**
+9. **Database Backup/Restore**
    - Status: Not implemented
    - Impact: Must use `pg_dump`/`pg_restore` manually
    - Effort: Large (1-2 weeks)
 
-9. **Permission/Role Management**
-   - Status: Not implemented
-   - Impact: Must use SQL for user/role management
-   - Effort: Large (1-2 weeks)
+10. **Permission/Role Management**
+    - Status: Not implemented
+    - Impact: Must use SQL for user/role management
+    - Effort: Large (1-2 weeks)
 
-10. **Table Statistics View**
+11. **Table Statistics View**
     - Status: Not implemented
     - Impact: No visibility into table size, index usage, etc.
     - Effort: Small (2-3 days)
 
-11. **Stored Procedure Editor**
+12. **Stored Procedure Editor**
     - Status: Not implemented
     - Impact: Must use external editor for procedures/functions
     - Effort: Medium (1 week)
 
 ### Low Priority
 
-12. **Custom Theme Support**
+13. **Custom Theme Support**
     - Status: Uses VS Code themes only
     - Impact: Limited customization
     - Effort: Medium (3-5 days)
 
-13. **Saved Queries/Snippets**
+14. **Saved Queries/Snippets**
     - Status: Not implemented
     - Impact: Must re-type common queries
     - Effort: Small (2-3 days)
 
-14. **Data Visualization Charts**
+15. **Data Visualization Charts**
     - Status: Not implemented
     - Impact: Must export to create visualizations
     - Effort: Large (2-3 weeks)
 
-15. **Schema Comparison Tool**
+16. **Schema Comparison Tool**
     - Status: Not implemented
     - Impact: Must manually compare schemas
     - Effort: Large (1-2 weeks)
 
-16. **Migration Generator**
+17. **Migration Generator**
     - Status: Not implemented
     - Impact: Must write migrations manually
     - Effort: Large (2-3 weeks)
 
-17. **Multi-Connection Comparison**
+18. **Multi-Connection Comparison**
     - Status: Not implemented
     - Impact: Cannot compare across connections
     - Effort: Large (1-2 weeks)
@@ -155,15 +201,15 @@
 
 ### Code Quality
 
-1. **Improve Type Safety in Message Passing**
-   - Current: Some `any` types in webview messages
-   - Goal: Full type safety with discriminated unions
-   - Effort: Medium
+1. **Improve Type Safety in Message Passing** ✅ COMPLETED
+   - **Status:** Implemented
+   - **Changes:** Created discriminated union types for webview messages (`WebviewToExtensionMessage` and `ExtensionToWebviewMessage`) in `src/types.ts`. Added type guards (`isWebviewToExtension()`) to safely validate messages. All webview communication is now fully typed.
+   - **Impact:** Type safety improved from `any` types to discriminated unions. Type errors caught at compile time instead of runtime.
 
-2. **Error Boundaries in Svelte**
-   - Current: JavaScript errors can crash webview
-   - Goal: Graceful error handling with recovery
-   - Effort: Small
+2. **Error Boundaries in Svelte** ✅ COMPLETED
+   - **Status:** Implemented
+   - **Changes:** Created `ErrorBoundary.svelte` component that catches uncaught JavaScript errors and unhandled promise rejections. Component displays graceful error UI with recovery options ("Try Again" and "Reload Page"). Errors are reported to the extension for logging.
+   - **Impact:** Webview no longer crashes on JavaScript errors. Users can recover gracefully instead of needing to restart the extension.
 
 3. **Refactor Connection Management**
    - Current: Map-based caching, no pooling config
@@ -174,6 +220,7 @@
    - Current: ~500KB+ for webview bundles
    - Goal: Code splitting, lazy loading
    - Effort: Medium
+
 
 ### Testing
 

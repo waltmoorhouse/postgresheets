@@ -1,0 +1,37 @@
+name: Component and Unit Tests
+
+on:
+  pull_request:
+    branches: [ 'main' ]
+
+jobs:
+  tests:
+    name: Run tests (unit + component)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm install -D svelte-preprocess
+          npm ci
+          npm ci --prefix webview
+
+      - name: Run unit and component tests
+        run: npm run test:components:ci
+
+      - name: Upload Jest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-results
+          path: ./jest-results || |
+            

@@ -3,6 +3,7 @@
  * Tests database connection lifecycle
  */
 
+// @ts-nocheck
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 
@@ -57,6 +58,8 @@ suite('Connection Manager Integration Tests', () => {
             'postgres-editor.openTable',
             'postgres-editor.connect',
             'postgres-editor.disconnect',
+            'postgres-editor.cancelConnect',
+            'postgres-editor.cancelAllConnects',
             'postgres-editor.refreshConnection',
             'postgres-editor.createTable',
             'postgres-editor.alterTable',

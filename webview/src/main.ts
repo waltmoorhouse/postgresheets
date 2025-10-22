@@ -1,4 +1,5 @@
 import './app.css';
+import './data-editor.css';
 import App from './App.svelte';
 
 declare global {

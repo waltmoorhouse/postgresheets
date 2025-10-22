@@ -158,6 +158,12 @@ export class SchemaDesigner {
     ): Promise<void> {
         const state = await this.fetchStructure(connectionId, schemaName, tableName);
         if (!state) {
+            if (postMessageOnly) {
+                panel.webview.postMessage({
+                    command: 'executionError',
+                    error: 'Failed to fetch table structure. Check your connection and try again.'
+                });
+            }
             return;
         }
 
@@ -272,7 +278,7 @@ export class SchemaDesigner {
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'schema-designer', 'main.js')
         );
         const baseStyleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'index.css')
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css')
         );
         const appStyleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main2.css')

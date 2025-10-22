@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM"],
+    "rootDir": ".",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "types": ["jest", "@testing-library/jest-dom"]
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["test/integration/**"]
+}

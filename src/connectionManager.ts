@@ -1,7 +1,7 @@
 // connectionManager.ts - Manages database connections and credentials
 
 import * as vscode from 'vscode';
-import { Client } from 'pg';
+import type { Client } from 'pg';
 
 /**
  * Represents the configuration for a database connection.
@@ -27,6 +27,10 @@ export class ConnectionManager {
     private connectionStatuses: Map<string, ConnectionStatus> = new Map();
     private activityCounters: Map<string, number> = new Map();
     private pendingConnections: Map<string, Promise<Client | null>> = new Map();
+    // Controllers to allow cancelling pending connection attempts
+    private pendingControllers: Map<string, AbortController> = new Map();
+    // Track connections that were explicitly cancelled by the user to prevent auto-retry
+    private cancelledConnections: Set<string> = new Set();
     private statusEmitter = new vscode.EventEmitter<{ id: string; status: ConnectionStatus }>();
 
     readonly onStatusChange = this.statusEmitter.event;
@@ -134,7 +138,7 @@ export class ConnectionManager {
      * Accepts forms like:
      *   postgres://user:pass@host:5432/db?sslmode=require
      */
-    private parseConnectionString(conn: string): { host: string; port: number; database: string; username: string; password?: string; ssl?: boolean } | null {
+    public parseConnectionString(conn: string): { host: string; port: number; database: string; username: string; password?: string; ssl?: boolean } | null {
         try {
             let uri = conn.trim();
             if (!uri.startsWith('postgres://') && !uri.startsWith('postgresql://')) {
@@ -163,6 +167,95 @@ export class ConnectionManager {
     }
 
     /**
+     * Tests a raw connection specification without saving it. This creates a
+     * temporary client, attempts to connect, then immediately closes it so
+     * the test does not modify ConnectionManager state.
+     */
+    public async testConnection(options: { connStr?: string; host?: string; port?: number; database?: string; username?: string; password?: string; ssl?: boolean; timeoutMs?: number }): Promise<{ success: boolean; error?: string }> {
+        try {
+            let parsed: { host: string; port: number; database: string; username: string; password?: string; ssl?: boolean } | null = null;
+            if (options.connStr) {
+                parsed = this.parseConnectionString(options.connStr);
+                if (!parsed) {
+                    return { success: false, error: 'Invalid connection string' };
+                }
+            } else {
+                if (!options.host || !options.username || !options.database) {
+                    return { success: false, error: 'Missing host/username/database' };
+                }
+                parsed = {
+                    host: options.host,
+                    port: options.port ?? 5432,
+                    database: options.database,
+                    username: options.username,
+                    password: options.password,
+                    ssl: options.ssl
+                };
+            }
+
+            // Import the runtime Client at call-time so test harnesses can
+            // mock or replace the 'pg' module before this code executes.
+            // We keep a type-only import above so TypeScript still knows
+            // the Client shape but the runtime module isn't statically
+            // imported which interferes with some Jest ESM mock flows.
+            const { Client } = await import('pg');
+
+            const client = new Client({
+                host: parsed.host,
+                port: parsed.port,
+                database: parsed.database,
+                user: parsed.username,
+                password: options.password ?? parsed.password,
+                ssl: parsed.ssl ? { rejectUnauthorized: false } : undefined,
+                // Use a reasonable test timeout to avoid long network waits
+                connectionTimeoutMillis: options.timeoutMs ?? 5000
+            });
+
+            await client.connect();
+            try {
+                await client.end();
+            } catch {
+                // ignore end errors
+            }
+
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+    }
+
+    /**
+     * Persists a new connection configuration (or updates an existing one).
+     * Generates an id if one is not provided.
+     */
+    public async saveNewConnection(config: Partial<ConnectionConfig> & { name: string }, password?: string, update: boolean = false): Promise<ConnectionConfig> {
+        const connections = await this.getConnections();
+
+        let finalConfig: ConnectionConfig;
+        if (update && config.id) {
+            const index = connections.findIndex(c => c.id === config.id);
+            if (index !== -1) {
+                finalConfig = { ...(connections[index]), ...(config as any) };
+                connections[index] = finalConfig;
+            } else {
+                // Fall back to creating a new config
+                finalConfig = { ...(config as any), id: this.generateId() } as ConnectionConfig;
+                connections.push(finalConfig);
+            }
+        } else {
+            finalConfig = { ...(config as any), id: config.id ?? this.generateId() } as ConnectionConfig;
+            connections.push(finalConfig);
+        }
+
+        await this.context.globalState.update('connections', connections);
+        if (password) {
+            await this.context.secrets.store(`postgres-password-${finalConfig.id}`, password);
+        }
+
+        return finalConfig;
+    }
+
+    /**
      * Deletes a database connection by its ID.
      * @param id The ID of the connection to delete.
      */
@@ -171,21 +264,63 @@ export class ConnectionManager {
         const config = connections.find(c => c.id === id);
         if (!config) return;
 
-        const confirm = await vscode.window.showWarningMessage(
-            `Delete connection "${config.name}"?`,
-            'Delete',
-            'Cancel'
-        );
+        const status = this.getConnectionStatus(id);
+        // (Removed test-only debug logging)
 
-        if (confirm === 'Delete') {
-            const filtered = connections.filter(c => c.id !== id);
-            await this.context.globalState.update('connections', filtered);
-            await this.context.secrets.delete(`postgres-password-${id}`);
-            
-            await this.disconnect(id);
+        // If the connection is currently connecting/connected/busy, ask the
+        // user whether to disconnect (or cancel) and delete. For simple
+        // disconnected entries, proceed with a normal delete confirmation.
+    if (status === 'connecting') {
+            const confirm = await vscode.window.showWarningMessage(
+                `Connection "${config.name}" is currently connecting. Disconnect and delete?`,
+                'Disconnect & Delete',
+                'Cancel'
+            );
 
-            vscode.window.showInformationMessage(`Connection "${config.name}" deleted`);
+            if (confirm !== 'Disconnect & Delete') return;
+            // (Removed test-only debug logging)
+
+            // Cancel the in-flight connect (best-effort) and ensure any
+            // existing client is closed.
+            try {
+                await this.cancelConnect(id);
+                await this.disconnect(id);
+            } catch (err) {
+                vscode.window.showErrorMessage(`Failed to cancel connection: ${err}`);
+                return;
+            }
+    } else if (status === 'connected' || status === 'busy') {
+            const confirm = await vscode.window.showWarningMessage(
+                `Connection "${config.name}" is currently connected. Disconnect and delete?`,
+                'Disconnect & Delete',
+                'Cancel'
+            );
+
+            if (confirm !== 'Disconnect & Delete') return;
+
+            try {
+                await this.disconnect(id);
+            } catch (err) {
+                vscode.window.showErrorMessage(`Failed to disconnect: ${err}`);
+                return;
+            }
+        } else {
+            const confirm = await vscode.window.showWarningMessage(
+                `Delete connection "${config.name}"?`,
+                'Delete',
+                'Cancel'
+            );
+            if (confirm !== 'Delete') return;
         }
+
+        // Remove stored configuration and secrets after ensuring there are
+        // no active or pending connections for the id.
+        // (Removed test-only debug logging)
+        const filtered = connections.filter(c => c.id !== id);
+        await this.context.globalState.update('connections', filtered);
+        await this.context.secrets.delete(`postgres-password-${id}`);
+
+        vscode.window.showInformationMessage(`Connection "${config.name}" deleted`);
     }
 
     /**
@@ -211,8 +346,15 @@ export class ConnectionManager {
             return this.connections.get(id)!;
         }
 
+        // If this connection was explicitly cancelled by the user, don't auto-retry
+        if (!forceReconnect && this.cancelledConnections.has(id)) {
+            return null;
+        }
+
         if (forceReconnect) {
             await this.disconnect(id);
+            // If forcing a reconnect, clear the cancelled flag
+            this.cancelledConnections.delete(id);
         }
 
         const pending = this.pendingConnections.get(id);
@@ -235,10 +377,23 @@ export class ConnectionManager {
         }
 
         this.setStatus(id, 'connecting');
+        // Debug logging during tests to help diagnose race conditions in test environment
+        // (Removed test-only debug logging)
+
+        // Create an AbortController so callers can cancel this connection attempt
+        const controller = new AbortController();
+        this.pendingControllers.set(id, controller);
+        // (Removed test-only debug logging)
 
         const connectPromise = (async () => {
+            let client: Client | undefined;
             try {
-                const client = new Client({
+                // Import the runtime Client at call-time so tests that mock
+                // the 'pg' module (jest.doMock / moduleNameMapper) are
+                // respected when creating a real client for connect().
+                const { Client } = await import('pg');
+
+                client = new Client({
                     host: config.host,
                     port: config.port,
                     database: config.database,
@@ -247,15 +402,68 @@ export class ConnectionManager {
                     ssl: config.ssl ? { rejectUnauthorized: false } : undefined
                 });
 
-                await client.connect();
-                this.attachClientListeners(id, client);
-                this.connections.set(id, client);
+                // Promise that resolves to null if the user aborts the connection attempt.
+                const abortPromise = new Promise<Client | null>((resolve) => {
+                    controller.signal.addEventListener('abort', async () => {
+                        // (Removed test-only debug logging)
+                        try {
+                            // Attempt to forcibly destroy the underlying socket/stream
+                            // if the client has started a connection but hasn't
+                            // completed. This increases the chance of cancelling a
+                            // connect attempt that would otherwise block until OS
+                            // TCP timeouts expire.
+                            try {
+                                const connAny = client as any;
+                                if (connAny && connAny.connection && connAny.connection.stream) {
+                                    try { connAny.connection.stream.destroy(); } catch {}
+                                }
+                            } catch {}
+
+                            // Also attempt a graceful end if the client is already
+                            // connected.
+                            if (client) {
+                                try { await client.end(); } catch {}
+                            }
+                        } catch (e) {
+                            // swallow
+                        }
+                        // Resolve with null to indicate the connect was cancelled.
+                        resolve(null);
+                    }, { once: true });
+                    // (Removed test-only debug logging)
+                });
+
+                // Race the real connect against the abort signal.
+                const connectOp = client.connect().then(() => client);
+                const result = await Promise.race([connectOp, abortPromise]);
+
+                if (result === null) {
+                    // User cancelled; return null without showing an error.
+                    this.setStatus(id, 'disconnected');
+                    return null;
+                }
+
+                // Successfully connected
+                const connectedClient = result as Client;
+                this.attachClientListeners(id, connectedClient);
+                this.connections.set(id, connectedClient);
                 this.setStatus(id, 'connected');
-                return client;
+                return connectedClient;
             } catch (error) {
+                // (Removed test-only debug logging)
+                // If this connection was aborted, the controller will already have
+                // set the status to 'disconnected' — treat that case as non-error.
+                if (controller.signal.aborted) {
+                    return null;
+                }
+
                 this.setStatus(id, 'error');
                 vscode.window.showErrorMessage(`Failed to connect: ${error}`);
                 return null;
+            } finally {
+                // Ensure controller is cleared when the attempt finishes
+                // (Removed test-only debug logging)
+                this.pendingControllers.delete(id);
             }
         })();
 
@@ -269,12 +477,24 @@ export class ConnectionManager {
     }
 
     async disconnect(id: string): Promise<void> {
-        const pending = this.pendingConnections.get(id);
-        if (pending) {
+        // If a connection attempt is in-flight, abort it so the user doesn't
+        // have to wait for a long network timeout.
+        const controller = this.pendingControllers.get(id);
+        if (controller) {
             try {
-                await pending;
+                controller.abort();
             } catch {
-                // ignore errors here; pending connect already surfaced
+                // ignore
+            }
+
+            const pending = this.pendingConnections.get(id);
+            if (pending) {
+                try {
+                    // Wait for the pending promise to settle so resources are cleaned up.
+                    await pending;
+                } catch {
+                    // ignore
+                }
             }
         }
 
@@ -289,11 +509,51 @@ export class ConnectionManager {
             }
         }
         this.setStatus(id, 'disconnected');
+        // Clear the cancelled flag when explicitly disconnecting
+        this.cancelledConnections.delete(id);
     }
 
     async refreshConnection(id: string): Promise<Client | null> {
         await this.disconnect(id);
         return this.connect(id, false);
+    }
+
+    /**
+     * Cancels an in-flight connection attempt if present.
+     * Returns true if a pending attempt was found and cancelled, false otherwise.
+     */
+    async cancelConnect(id: string): Promise<boolean> {
+        // (Removed test-only debug logging)
+
+        const controller = this.pendingControllers.get(id);
+        if (!controller) {
+            // (Removed test-only debug logging)
+            return false;
+        }
+
+        try {
+            controller.abort();
+        } catch (e) {
+            // ignore errors during abort
+        }
+
+        const pending = this.pendingConnections.get(id);
+        if (pending) {
+            try {
+                await pending;
+            } catch {
+                // ignore
+            }
+        }
+
+        // Ensure internal maps are cleared and status reflects that we're not connecting
+        this.pendingControllers.delete(id);
+        this.pendingConnections.delete(id);
+        this.setStatus(id, 'disconnected');
+        // Mark this connection as explicitly cancelled so it won't auto-retry
+        this.cancelledConnections.add(id);
+        // (Removed test-only debug logging)
+        return true;
     }
 
     getConnectionStatus(id: string): ConnectionStatus {
@@ -334,18 +594,24 @@ export class ConnectionManager {
     }
 
     private attachClientListeners(id: string, client: Client): void {
-        client.on('error', (error) => {
-            console.error(`Connection ${id} error`, error);
-            this.connections.delete(id);
-            this.activityCounters.delete(id);
-            this.setStatus(id, 'error');
-        });
+        // Some test mocks provide a minimal client without an `on` method.
+        // Guard to avoid throwing when tests pass in such mocks.
+        if (client && typeof (client as any).on === 'function') {
+            client.on('error', (error) => {
+                console.error(`Connection ${id} error`, error);
+                this.connections.delete(id);
+                this.activityCounters.delete(id);
+                this.setStatus(id, 'error');
+            });
 
-        client.on('end', () => {
-            this.connections.delete(id);
-            this.activityCounters.delete(id);
-            this.setStatus(id, 'disconnected');
-        });
+            client.on('end', () => {
+                this.connections.delete(id);
+                this.activityCounters.delete(id);
+                this.setStatus(id, 'disconnected');
+            });
+        } else {
+            // No-op if client does not support event listeners.
+        }
     }
 
     /**

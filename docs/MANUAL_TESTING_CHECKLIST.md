@@ -124,6 +124,8 @@ _____________________________________________
 ☐ Status changes to "connecting" then "connected"  
 ☐ No error messages  
 ☐ Databases expand correctly  
+☐ While connecting, click the notification "Cancel" button to abort the attempt  
+☐ While connecting, right-click the connection and select "Cancel Connect" to abort the attempt  
 
 ### Connection Errors
 ☐ Wrong password shows error message  
@@ -218,6 +220,7 @@ _____________________________________________
 ☐ Data types display appropriately  
 ☐ NULL values shown as "NULL"  
 ☐ Empty strings shown as empty  
+☐ Status indicators include a shape/glyph and textual label (not color-only)
 
 ### Data Types
 ☐ Text/VARCHAR displays correctly  
@@ -365,7 +368,7 @@ _____________________________________________
 ☐ Can enter NULL (how?)  
 ☐ Can enter empty string  
 ☐ Can edit JSON (modal or inline)  
-☐ Can edit arrays  
+☐ Can edit arrays (via JSON editor modal)  
 
 ### Delete Row
 ☐ Select row (checkbox)  
@@ -402,11 +405,11 @@ _____________________________________________
 ☐ Data reloads  
 ☐ Change count resets  
 
+
 ### Save (Immediate Mode)
-☐ Toggle batch mode off (if supported)  
-☐ Each change executes immediately  
-☐ Success message per change  
-☐ Can continue editing  
+☐ Immediate (non-batch) mode removed — the editor runs all saves in a single transaction (batch mode) by design.  
+☐ There should be no UI toggle for "Immediate Mode"; if a toggle is present it is considered a bug.  
+☐ Preview SQL should still show parameterized statements for the pending changes.  
 
 ### Save with Errors
 ☐ Constraint violation shows error  
@@ -789,22 +792,367 @@ _____________________________________________
 
 ---
 
-## 24. Data Integrity Verification
+## 25. CSV Export Feature
 
-### After CRUD Operations
-☐ Use external tool (psql, pgAdmin) to verify:  
-  ☐ INSERTs actually inserted  
-  ☐ UPDATEs modified correct rows  
-  ☐ DELETEs removed correct rows  
-  ☐ Composite keys preserved  
-  ☐ Special characters intact  
-  ☐ NULL vs empty string correct  
-  ☐ JSON structure valid  
+### Basic Export
+☐ Right-click table → "Export as CSV" appears in context menu  
+☐ Dialog appears asking for header preference  
+☐ File save dialog opens with sensible default name  
+☐ Can select different directory  
+☐ Can change filename  
+☐ CSV file created successfully  
+
+### CSV Content Verification
+☐ Headers included when selected  
+☐ Headers omitted when deselected  
+☐ All rows exported correctly  
+☐ All columns exported correctly  
+☐ Special characters properly escaped  
+☐ Quotes handled correctly (RFC 4180)  
+☐ Commas within fields escaped  
+☐ Newlines handled  
+☐ NULL values exported as empty  
+
+### CSV Roundtrip
+☐ Export data  
+☐ Open in Excel/Sheets  
+☐ Data displays correctly  
+☐ Special characters visible  
+☐ No data corruption  
+☐ File size reasonable  
+
+### Accessibility - CSV Export
+☐ Tab navigates through dialog  
+☐ Enter/Space activates buttons  
+☐ Header selection quick pick keyboard navigable  
+☐ File save dialog accessible  
+☐ Screen reader announces options  
+☐ Focus visible at all times  
 
 **Notes:**
 _____________________________________________
 
 ---
+
+## 26. CSV Import Feature
+
+### File Selection
+☐ Right-click table → "Import from CSV" appears in context menu  
+☐ File picker dialog opens  
+☐ Can navigate to file location  
+☐ CSV files visible in picker  
+☐ Can select CSV file  
+☐ Can cancel file selection  
+
+### Header Detection
+☐ Dialog asks if first row is headers  
+☐ "Yes" option selected by default  
+☐ "No" option available  
+☐ Can switch between options  
+☐ Keyboard navigable  
+
+### Column Mapping
+☐ Mapping preview shows before import  
+☐ CSV columns mapped to table columns  
+☐ Header names auto-matched to column names  
+☐ Mapping accurate and complete  
+☐ Can review mapping before proceeding  
+
+### Type Conversion
+☐ Boolean values correctly converted  
+☐ Integer values correctly converted  
+☐ Float/Numeric values correctly converted  
+☐ Date values correctly converted  
+☐ Timestamp values correctly converted  
+☐ JSON values correctly parsed  
+☐ UUID values correctly formatted  
+☐ Empty cells converted to NULL  
+☐ Text values preserved correctly  
+
+### Import Execution
+☐ Import button initiates transaction  
+☐ Row count displayed correctly  
+☐ All rows inserted successfully  
+☐ Transaction committed on success  
+☐ Success message appears  
+☐ Table refreshes with new data  
+☐ No duplicate rows  
+
+### Error Handling
+☐ Import fails gracefully on invalid data  
+☐ Transaction rolled back on error  
+☐ Error message displayed  
+☐ Original data untouched  
+☐ User can retry with corrected file  
+
+### Import with Special Cases
+☐ CSV with embedded quotes  
+☐ CSV with embedded commas  
+☐ CSV with newlines in fields  
+☐ CSV with very long fields  
+☐ CSV with NULL/empty values  
+☐ CSV with JSON data  
+☐ CSV with special characters  
+☐ CSV with Unicode characters  
+☐ Large CSV file (1000+ rows)  
+
+### Accessibility - CSV Import
+☐ Tab navigates through dialogs  
+☐ Enter/Space activates buttons  
+☐ File picker keyboard navigable  
+☐ Header selection quick pick accessible  
+☐ Screen reader announces file count  
+☐ Screen reader announces column mapping  
+☐ Focus indicators visible  
+☐ No keyboard traps  
+☐ Escape cancels at any step  
+
+**Notes:**
+_____________________________________________
+
+---
+
+## 27. Query History Feature
+
+### History Recording
+☐ Queries recorded automatically  
+☐ Connection name stored  
+☐ Timestamp recorded  
+☐ Database name stored  
+☐ Execution time captured (if available)  
+☐ History persists across sessions  
+☐ History limit enforced (default 100)  
+
+### History Browsing
+☐ "Query History" command in palette  
+☐ Quick pick shows recent queries  
+☐ Description shows connection and time  
+☐ Can scroll through long list  
+☐ Search works on query text  
+☐ Search works on connection name  
+☐ Queries truncated for display  
+☐ Query History appears as a bottom-panel view (same tray as Terminal and Debug Console) so it can be visible while editing tables above.
+
+### History Actions
+☐ "Copy to Clipboard" option works  
+☐ Query copied exactly as entered  
+☐ "Re-run Query" option appears  
+☐ Re-run functionality (if implemented)  
+☐ Confirmation before destructive queries (if implemented)  
+☐ History entries can be opened in the SQL Terminal ("Open in SQL Terminal") or sent to the terminal for easy re-execution.
+
+### History Management
+☐ "Clear Query History" command available  
+☐ Confirmation dialog shows  
+☐ All history cleared when confirmed  
+☐ History stays when cancelled  
+☐ Per-connection clearing (if implemented)  
+
+### Accessibility - Query History
+☐ Tab navigates quick picks  
+☐ Arrow keys move through options  
+☐ Enter selects item  
+☐ Escape cancels  
+☐ Screen reader announces query count  
+☐ Screen reader announces descriptions  
+☐ Focus management correct  
+☐ Keyboard shortcuts work from all contexts  
+
+**Notes:**
+_____________________________________________
+
+
+---
+
+## 27.5 SQL Terminal Feature
+
+### Access
+☐ Command palette shows "Open SQL Terminal"  
+☐ Can open terminal from context menu on a connection  
+☐ Prompt shows format: "$<username>@<connectionName>/<database>/<schema> > "  
+
+### Basic Input
+☐ Can type SQL directly at the prompt  
+☐ Supports multi-line input (statements spanning lines)  
+☐ Enter executes the current statement when terminated with a semicolon (;)  
+☐ Backspace and Ctrl+C behave as expected to edit/interrupt input  
+
+### Execution
+☐ Sent SQL executes against the selected connection  
+☐ Results printed to the terminal in readable tabular form or as JSON for complex types  
+☐ Errors (syntax or runtime) are shown with helpful messages  
+☐ Execution time and row counts displayed when available  
+
+### Context & Navigation
+☐ Can choose connection and schema when opening the terminal  
+☐ Terminal sets search_path to the chosen schema for the session  
+☐ Can open multiple terminals for different connections/schemas  
+☐ Terminal history (up/down arrows) navigates previous commands  
+
+### Integration with Query History
+☐ Queries executed from the terminal are recorded in Query History  
+☐ Can send a Query History entry to an open terminal ("Open in SQL Terminal")  
+☐ Can re-run a history entry directly from the history panel into the terminal  
+
+### Security
+☐ Terminal does not leak passwords or secrets in output  
+☐ Sensitive error messages redact secrets if present  
+
+**Notes:**
+_____________________________________________
+
+
+---
+
+## 28. Index Management Feature
+
+### Access Index Manager
+☐ Right-click table → "Manage Indexes" appears in context menu  
+☐ Index manager panel opens in new column  
+☐ Table name displayed in title  
+☐ Schema name displayed in title  
+
+### View Indexes
+☐ All existing indexes listed  
+☐ Column names shown for each index  
+☐ Index type displayed (btree, hash, etc.)  
+☐ Unique indexes indicated  
+☐ Primary key indexes indicated  
+☐ Index size displayed  
+☐ Size formatted appropriately (KB, MB)  
+
+### Create Index
+☐ Click "Create Index" button  
+☐ Prompted for index name  
+☐ Prompted for column names (comma-separated)  
+☐ Prompted for unique constraint (Yes/No)  
+☐ Index created successfully  
+☐ Success message displayed  
+☐ Index appears in list  
+☐ Tree view can be refreshed to show new index  
+
+### Reindex
+☐ Click "Reindex" button on existing index  
+☐ Reindex operation completes  
+☐ Success message displayed  
+☐ No data loss  
+
+### Drop Index
+☐ Click "Drop" button on non-primary index  
+☐ Confirmation dialog appears  
+☐ Index dropped on confirmation  
+☐ Success message displayed  
+☐ Index removed from list  
+☐ Cannot drop primary key indexes (button not shown)  
+
+### Refresh Indexes
+☐ Click "Refresh" button  
+☐ Index list reloads  
+☐ New indexes appear  
+☐ Dropped indexes removed  
+
+### Accessibility - Index Management
+☐ Tab navigates through index list and buttons  
+☐ Enter activates buttons  
+☐ Keyboard navigation works in table  
+☐ Screen reader announces index details  
+☐ Focus indicators visible  
+
+**Notes:**
+_____________________________________________
+
+---
+
+## 29. Permissions Management Feature
+
+### Access Permissions Manager
+☐ Right-click table → "Manage Permissions" appears in context menu  
+☐ Permissions manager panel opens in new column  
+☐ Table name displayed in title  
+☐ Schema name displayed in title  
+
+### View Permissions
+☐ All current permissions listed  
+☐ Role/user names displayed  
+☐ Privileges shown (SELECT, INSERT, UPDATE, DELETE)  
+☐ Grant option indicated (Yes/No)  
+☐ Grouped by role/user  
+☐ Empty state shown if no permissions  
+
+### Grant Permissions
+☐ Click "Grant Permissions" button  
+☐ Prompted for role name  
+☐ Multi-select picker shows privilege options  
+☐ Default privileges selected (SELECT, INSERT, UPDATE)  
+☐ Can select/deselect privileges  
+☐ Permissions granted successfully  
+☐ Success message displayed  
+☐ Permissions appear in list  
+
+### Revoke Permissions
+☐ Click "Revoke" button on existing permission  
+☐ Confirmation dialog appears  
+☐ Shows which role will lose permissions  
+☐ Permissions revoked on confirmation  
+☐ Success message displayed  
+☐ Permissions removed from list  
+
+### Refresh Permissions
+☐ Click "Refresh" button  
+☐ Permissions list reloads  
+☐ New permissions appear  
+☐ Revoked permissions removed  
+
+### Error Handling
+☐ Invalid role name shows error  
+☐ Insufficient privileges shows error  
+☐ Error messages helpful  
+☐ Can retry after fixing  
+
+### Accessibility - Permissions Management
+☐ Tab navigates through permissions list and buttons  
+☐ Enter activates buttons  
+☐ Keyboard navigation works in table  
+☐ Screen reader announces permission details  
+☐ Focus indicators visible  
+☐ Quick pick for privileges is keyboard navigable  
+
+**Notes:**
+_____________________________________________
+
+---
+
+## Issues Found
+
+### Critical Issues
+1. _______________________________________________
+2. _______________________________________________
+3. _______________________________________________
+
+### Major Issues
+1. _______________________________________________
+2. _______________________________________________
+3. _______________________________________________
+
+### Minor Issues
+1. _______________________________________________
+2. _______________________________________________
+3. _______________________________________________
+
+---
+
+## Overall Assessment
+
+**Ready for Release:** ☐ Yes ☐ No ☐ With Reservations
+
+**Comments:**
+_______________________________________________________
+_______________________________________________________
+_______________________________________________________
+
+**Signature:** _______________  **Date:** _______________
+
+```
 
 ## Issues Found
 
