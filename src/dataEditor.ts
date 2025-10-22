@@ -40,7 +40,6 @@ export class DataEditor {
     private readonly initializedPanels = new Set<vscode.WebviewPanel>();
     private readonly panelState = new Map<vscode.WebviewPanel, PanelState>();
     private paginationSize = 100;
-    private batchMode = true;
     // Cache schema/enum metadata keyed by panel key (connection:schema.table)
     private schemaCache: Map<string, CachedSchemaMetadata> = new Map();
 
@@ -387,7 +386,6 @@ export class DataEditor {
                 currentPage: state.page,
                 totalRows,
                 paginationSize: this.paginationSize,
-                batchMode: this.batchMode,
                 sort: state.sort,
                 filters: state.filters,
                 searchTerm: state.searchTerm,
@@ -522,8 +520,6 @@ export class DataEditor {
         batchMode: boolean,
         bypassValidation: boolean = false
     ): Promise<void> {
-        this.batchMode = batchMode;
-
         const client = await this.connectionManager.getClient(connectionId);
         if (!client) {
             panel.webview.postMessage({ command: 'executionComplete', success: false, error: 'No connection available' });
@@ -569,28 +565,23 @@ export class DataEditor {
         this.connectionManager.markBusy(connectionId);
 
         try {
-            if (batchMode) {
-                await client.query('BEGIN');
-            }
+            // Always use batch mode (transactions) for data safety
+            await client.query('BEGIN');
 
             for (const change of changes) {
                 const sql = SqlGenerator.generateSql(schemaName, tableName, change);
                 await client.query(sql.query, sql.values);
             }
 
-            if (batchMode) {
-                await client.query('COMMIT');
-            }
+            await client.query('COMMIT');
 
             panel.webview.postMessage({ command: 'executionComplete', success: true });
             await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
         } catch (error) {
-            if (batchMode) {
-                try {
-                    await client.query('ROLLBACK');
-                } catch (rollbackError) {
-                    console.error('Failed to rollback transaction', rollbackError);
-                }
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Failed to rollback transaction', rollbackError);
             }
             const errorMessage = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Failed to execute changes: ${errorMessage}`);

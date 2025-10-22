@@ -73,7 +73,6 @@ export interface TableStatePayload {
     currentPage: number;
     totalRows: number;
     paginationSize: number;
-    batchMode: boolean;
     sort: SortDescriptor | null;
     filters: FilterMap;
     searchTerm: string;
@@ -105,7 +104,7 @@ export interface ErrorInfo {
 export type WebviewToExtensionMessage =
     | { command: 'executeChanges'; changes: GridChange[]; batchMode: boolean; bypassValidation?: boolean }
     | { command: 'loadPage'; pageNumber: number }
-    | { command: 'previewChanges'; changes: GridChange[]; batchMode: boolean }
+    | { command: 'previewChanges'; changes: GridChange[] }
     | { command: 'search'; term: string }
     | { command: 'applySort'; sort: SortDescriptor | null }
     | { command: 'applyFilters'; filters: FilterMap }

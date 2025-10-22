@@ -405,11 +405,11 @@ _____________________________________________
 ☐ Data reloads  
 ☐ Change count resets  
 
+
 ### Save (Immediate Mode)
-☐ Toggle batch mode off (if supported)  
-☐ Each change executes immediately  
-☐ Success message per change  
-☐ Can continue editing  
+☐ Immediate (non-batch) mode removed — the editor runs all saves in a single transaction (batch mode) by design.  
+☐ There should be no UI toggle for "Immediate Mode"; if a toggle is present it is considered a bug.  
+☐ Preview SQL should still show parameterized statements for the pending changes.  
 
 ### Save with Errors
 ☐ Constraint violation shows error  
@@ -795,7 +795,7 @@ _____________________________________________
 ## 25. CSV Export Feature
 
 ### Basic Export
-☐ Right-click table → "Export as CSV" appears  
+☐ Right-click table → "Export as CSV" appears in context menu  
 ☐ Dialog appears asking for header preference  
 ☐ File save dialog opens with sensible default name  
 ☐ Can select different directory  
@@ -837,7 +837,7 @@ _____________________________________________
 ## 26. CSV Import Feature
 
 ### File Selection
-☐ Right-click table → "Import from CSV" appears  
+☐ Right-click table → "Import from CSV" appears in context menu  
 ☐ File picker dialog opens  
 ☐ Can navigate to file location  
 ☐ CSV files visible in picker  
@@ -931,6 +931,7 @@ _____________________________________________
 ☐ Search works on query text  
 ☐ Search works on connection name  
 ☐ Queries truncated for display  
+☐ Query History appears as a bottom-panel view (same tray as Terminal and Debug Console) so it can be visible while editing tables above.
 
 ### History Actions
 ☐ "Copy to Clipboard" option works  
@@ -938,6 +939,7 @@ _____________________________________________
 ☐ "Re-run Query" option appears  
 ☐ Re-run functionality (if implemented)  
 ☐ Confirmation before destructive queries (if implemented)  
+☐ History entries can be opened in the SQL Terminal ("Open in SQL Terminal") or sent to the terminal for easy re-execution.
 
 ### History Management
 ☐ "Clear Query History" command available  
@@ -955,6 +957,165 @@ _____________________________________________
 ☐ Screen reader announces descriptions  
 ☐ Focus management correct  
 ☐ Keyboard shortcuts work from all contexts  
+
+**Notes:**
+_____________________________________________
+
+
+---
+
+## 27.5 SQL Terminal Feature
+
+### Access
+☐ Command palette shows "Open SQL Terminal"  
+☐ Can open terminal from context menu on a connection  
+☐ Prompt shows format: "$<username>@<connectionName>/<database>/<schema> > "  
+
+### Basic Input
+☐ Can type SQL directly at the prompt  
+☐ Supports multi-line input (statements spanning lines)  
+☐ Enter executes the current statement when terminated with a semicolon (;)  
+☐ Backspace and Ctrl+C behave as expected to edit/interrupt input  
+
+### Execution
+☐ Sent SQL executes against the selected connection  
+☐ Results printed to the terminal in readable tabular form or as JSON for complex types  
+☐ Errors (syntax or runtime) are shown with helpful messages  
+☐ Execution time and row counts displayed when available  
+
+### Context & Navigation
+☐ Can choose connection and schema when opening the terminal  
+☐ Terminal sets search_path to the chosen schema for the session  
+☐ Can open multiple terminals for different connections/schemas  
+☐ Terminal history (up/down arrows) navigates previous commands  
+
+### Integration with Query History
+☐ Queries executed from the terminal are recorded in Query History  
+☐ Can send a Query History entry to an open terminal ("Open in SQL Terminal")  
+☐ Can re-run a history entry directly from the history panel into the terminal  
+
+### Security
+☐ Terminal does not leak passwords or secrets in output  
+☐ Sensitive error messages redact secrets if present  
+
+**Notes:**
+_____________________________________________
+
+
+---
+
+## 28. Index Management Feature
+
+### Access Index Manager
+☐ Right-click table → "Manage Indexes" appears in context menu  
+☐ Index manager panel opens in new column  
+☐ Table name displayed in title  
+☐ Schema name displayed in title  
+
+### View Indexes
+☐ All existing indexes listed  
+☐ Column names shown for each index  
+☐ Index type displayed (btree, hash, etc.)  
+☐ Unique indexes indicated  
+☐ Primary key indexes indicated  
+☐ Index size displayed  
+☐ Size formatted appropriately (KB, MB)  
+
+### Create Index
+☐ Click "Create Index" button  
+☐ Prompted for index name  
+☐ Prompted for column names (comma-separated)  
+☐ Prompted for unique constraint (Yes/No)  
+☐ Index created successfully  
+☐ Success message displayed  
+☐ Index appears in list  
+☐ Tree view can be refreshed to show new index  
+
+### Reindex
+☐ Click "Reindex" button on existing index  
+☐ Reindex operation completes  
+☐ Success message displayed  
+☐ No data loss  
+
+### Drop Index
+☐ Click "Drop" button on non-primary index  
+☐ Confirmation dialog appears  
+☐ Index dropped on confirmation  
+☐ Success message displayed  
+☐ Index removed from list  
+☐ Cannot drop primary key indexes (button not shown)  
+
+### Refresh Indexes
+☐ Click "Refresh" button  
+☐ Index list reloads  
+☐ New indexes appear  
+☐ Dropped indexes removed  
+
+### Accessibility - Index Management
+☐ Tab navigates through index list and buttons  
+☐ Enter activates buttons  
+☐ Keyboard navigation works in table  
+☐ Screen reader announces index details  
+☐ Focus indicators visible  
+
+**Notes:**
+_____________________________________________
+
+---
+
+## 29. Permissions Management Feature
+
+### Access Permissions Manager
+☐ Right-click table → "Manage Permissions" appears in context menu  
+☐ Permissions manager panel opens in new column  
+☐ Table name displayed in title  
+☐ Schema name displayed in title  
+
+### View Permissions
+☐ All current permissions listed  
+☐ Role/user names displayed  
+☐ Privileges shown (SELECT, INSERT, UPDATE, DELETE)  
+☐ Grant option indicated (Yes/No)  
+☐ Grouped by role/user  
+☐ Empty state shown if no permissions  
+
+### Grant Permissions
+☐ Click "Grant Permissions" button  
+☐ Prompted for role name  
+☐ Multi-select picker shows privilege options  
+☐ Default privileges selected (SELECT, INSERT, UPDATE)  
+☐ Can select/deselect privileges  
+☐ Permissions granted successfully  
+☐ Success message displayed  
+☐ Permissions appear in list  
+
+### Revoke Permissions
+☐ Click "Revoke" button on existing permission  
+☐ Confirmation dialog appears  
+☐ Shows which role will lose permissions  
+☐ Permissions revoked on confirmation  
+☐ Success message displayed  
+☐ Permissions removed from list  
+
+### Refresh Permissions
+☐ Click "Refresh" button  
+☐ Permissions list reloads  
+☐ New permissions appear  
+☐ Revoked permissions removed  
+
+### Error Handling
+☐ Invalid role name shows error  
+☐ Insufficient privileges shows error  
+☐ Error messages helpful  
+☐ Can retry after fixing  
+
+### Accessibility - Permissions Management
+☐ Tab navigates through permissions list and buttons  
+☐ Enter activates buttons  
+☐ Keyboard navigation works in table  
+☐ Screen reader announces permission details  
+☐ Focus indicators visible  
+☐ Quick pick for privileges is keyboard navigable  
 
 **Notes:**
 _____________________________________________

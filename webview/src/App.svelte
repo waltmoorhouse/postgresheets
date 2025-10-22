@@ -51,7 +51,6 @@
   let currentPage = 0;
   let totalRows = 0;
   let paginationSize = 100;
-  let batchMode = true;
   let searchTerm = '';
   let sqlPreview = '';
   let sqlPreviewOpen = false;
@@ -219,7 +218,6 @@
     currentPage = payload.currentPage ?? 0;
     totalRows = payload.totalRows ?? rawRows.length;
     paginationSize = payload.paginationSize ?? 100;
-    batchMode = payload.batchMode ?? true;
     searchTerm = '';
     sqlPreview = '';
     sqlPreviewOpen = false;
@@ -729,7 +727,7 @@
     activeSort = next;
     ensureVscode().postMessage({
       command: 'applySort',
-      payload: { sort: next }
+      sort: next
     });
   }
 
@@ -747,7 +745,7 @@
   function commitFilters(): void {
     ensureVscode().postMessage({
       command: 'applyFilters',
-      payload: { filters: { ...filters } }
+      filters: { ...filters }
     });
   }
 
@@ -1000,8 +998,7 @@
   sqlPreviewIsError = false;
     ensureVscode().postMessage({
       command: 'previewChanges',
-      changes,
-      batchMode: !bypassValidation
+      changes
     });
   }
 
@@ -1038,11 +1035,9 @@
     executing = true;
     ensureVscode().postMessage({
       command: 'executeChanges',
-      payload: {
-        changes,
-        batchMode,
-        bypassValidation
-      }
+      changes,
+      batchMode: true,
+      bypassValidation
     });
   }
 
@@ -1072,7 +1067,7 @@
         columnOrder: columns.map((c) => c.name),
         hiddenColumns: Array.from(hiddenColumnsSet)
       };
-      ensureVscode().postMessage({ command: 'saveTablePreferences', payload: { prefs } });
+      ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
     }
   }
 
@@ -1083,7 +1078,7 @@
       columnOrder: columns.map((c) => c.name),
       hiddenColumns: []
     };
-    ensureVscode().postMessage({ command: 'saveTablePreferences', payload: { prefs } });
+    ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
     hiddenModalOpen = false;
   }
 
@@ -1092,7 +1087,7 @@
       columnOrder: columns.map((c) => c.name),
       hiddenColumns: Array.from(hiddenColumnsSet)
     };
-    ensureVscode().postMessage({ command: 'saveTablePreferences', payload: { prefs } });
+    ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
   }
 
   // Handler for ColumnManager 'change' events. Kept as a top-level function so
@@ -1113,12 +1108,12 @@
   // Small utility functions missing after the refactor: pagination, search,
   // and resetting preferences. These invoke the extension via postMessage.
   function requestPage(page: number): void {
-    ensureVscode().postMessage({ command: 'loadPage', payload: { page } });
+    ensureVscode().postMessage({ command: 'loadPage', pageNumber: page });
     ariaLiveMessage = `Page ${page + 1} of ${Math.ceil(totalRows / paginationSize)} loaded`;
   }
 
   function executeSearch(): void {
-    ensureVscode().postMessage({ command: 'search', payload: { searchTerm: (searchTerm || '').trim() } });
+    ensureVscode().postMessage({ command: 'search', term: (searchTerm || '').trim() });
     ariaLiveMessage = searchTerm?.trim() 
       ? `Searching for "${searchTerm.trim()}"`
       : 'Search cleared, showing all rows';
@@ -1135,7 +1130,7 @@
     hiddenColumnsSet = new Set(items.filter(i => !i.visible).map(i => i.name));
     visibleColumns = columns.filter((c) => !hiddenColumnsSet.has(c.name));
     const prefs = { columnOrder: columns.map((c) => c.name), hiddenColumns: Array.from(hiddenColumnsSet) };
-    ensureVscode().postMessage({ command: 'saveTablePreferences', payload: { prefs } });
+    ensureVscode().postMessage({ command: 'saveTablePreferences', prefs });
   }
 
   function handleMessage(event: MessageEvent): void {
@@ -1256,10 +1251,6 @@
         </p>
       </div>
   <div class="actions" role="toolbar" aria-label="Table actions">
-        <label class="batch-toggle">
-          <input type="checkbox" bind:checked={batchMode}>
-          <span>Batch mode</span>
-        </label>
         <label class="bypass-toggle" title="Skip client-side validation and let the database enforce constraints">
           <input type="checkbox" bind:checked={bypassValidation}>
           <span>Bypass validation</span>

@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -98,6 +98,42 @@
         "title": "Drop Table",
         "icon": "$(trash)",
         "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.exportTableAsCSV",
+        "title": "Export as CSV",
+        "icon": "$(export)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.importTableFromCSV",
+        "title": "Import from CSV",
+        "icon": "$(import)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.manageIndexes",
+        "title": "Manage Indexes",
+        "icon": "$(list-tree)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.managePermissions",
+        "title": "Manage Permissions",
+        "icon": "$(lock)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.openSqlTerminal",
+        "title": "Open SQL Terminal",
+        "icon": "$(terminal)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.refreshQueryHistory",
+        "title": "Refresh Query History",
+        "icon": "$(refresh)",
+        "category": "PostgreSQL"
       }
     ],
     "viewsContainers": {
@@ -116,6 +152,14 @@
           "name": "Connections",
           "icon": "$(database)"
         }
+      ],
+      "panel": [
+        {
+          "type": "webview",
+          "id": "postgresQueryHistory",
+          "name": "Query History",
+          "icon": "$(history)"
+        }
       ]
     },
     "menus": {
@@ -133,6 +177,11 @@
         {
           "command": "postgres-editor.cancelAllConnects",
           "when": "view == postgresExplorer && postgresHasConnecting",
+          "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.refreshQueryHistory",
+          "when": "view == postgresQueryHistory",
           "group": "navigation"
         }
       ],
@@ -181,6 +230,31 @@
           "command": "postgres-editor.dropTable",
           "when": "view == postgresExplorer && viewItem == table",
           "group": "inline"
+        },
+        {
+          "command": "postgres-editor.exportTableAsCSV",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "1_table@1"
+        },
+        {
+          "command": "postgres-editor.importTableFromCSV",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "1_table@2"
+        },
+        {
+          "command": "postgres-editor.manageIndexes",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "postgres-editor.managePermissions",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "postgres-editor.openSqlTerminal",
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy)",
+          "group": "3_terminal@1"
         }
       ]
     },

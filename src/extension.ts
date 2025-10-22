@@ -7,6 +7,10 @@ import { CreateTableWizard } from './createTableWizard';
 import { DropTableWizard } from './dropTableWizard';
 import { CsvExporter } from './csvExporter';
 import { QueryHistory } from './queryHistory';
+import { QueryHistoryView } from './queryHistoryView';
+import { SqlTerminalProvider } from './sqlTerminalProvider';
+import { IndexManagerView } from './indexManagerView';
+import { PermissionsManagerView } from './permissionsManagerView';
 import { info } from './logger';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -43,12 +47,24 @@ export function activate(context: vscode.ExtensionContext) {
     const dropTableWizard = new DropTableWizard(context, connectionManager, () => treeProvider.refresh());
     const addConnectionWizard = new (require('./addConnectionWizard').AddConnectionWizard)(context, connectionManager, () => treeProvider.refresh());
     const queryHistory = new QueryHistory(context);
+    const queryHistoryView = new QueryHistoryView(context, queryHistory);
+    const sqlTerminalProvider = new SqlTerminalProvider(context, connectionManager, queryHistory);
+    const indexManagerView = new IndexManagerView(context, connectionManager);
+    const permissionsManagerView = new PermissionsManagerView(context, connectionManager);
 
     // Register tree view
     const treeView = vscode.window.createTreeView('postgresExplorer', {
         treeDataProvider: treeProvider,
         showCollapseAll: true
     });
+
+    // Register Query History webview view
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            QueryHistoryView.viewType,
+            queryHistoryView
+        )
+    );
 
     type ConnectionPickItem = vscode.QuickPickItem & { connection: ConnectionConfig };
 
@@ -491,70 +507,31 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        vscode.commands.registerCommand('postgres-editor.showQueryHistory', async () => {
-            const entries = queryHistory.getRecent(50);
-
-            if (entries.length === 0) {
-                vscode.window.showInformationMessage('No query history available.');
-                return;
-            }
-
-            interface QuickPickItemWithQuery extends vscode.QuickPickItem {
-                query: string;
-                entry: unknown;
-            }
-
-            const items: QuickPickItemWithQuery[] = entries.map(entry => ({
-                label: QueryHistory.formatEntry(entry),
-                description: `${entry.connectionName}`,
-                detail: `${new Date(entry.timestamp).toLocaleString()}${entry.executionTime ? ` (${entry.executionTime}ms)` : ''}`,
-                query: entry.query,
-                entry
-            }));
-
-            const selected = await vscode.window.showQuickPick(items, {
-                title: 'Query History',
-                placeHolder: 'Select a query to copy or re-run'
-            });
-
-            if (!selected) {
-                return;
-            }
-
-            const action = await vscode.window.showQuickPick(
-                [
-                    { label: '$(copy) Copy to Clipboard', value: 'copy' },
-                    { label: '$(redo) Re-run Query', value: 'rerun' }
-                ],
-                { title: 'Query History', placeHolder: 'What would you like to do?' }
-            );
-
-            if (!action) {
-                return;
-            }
-
-            if (action.value === 'copy') {
-                await vscode.env.clipboard.writeText(selected.query);
-                vscode.window.showInformationMessage('Query copied to clipboard');
-            } else if (action.value === 'rerun') {
-                vscode.window.showInformationMessage('Re-running queries is not yet implemented');
-                // TODO: Implement query re-run functionality
-            }
+        vscode.commands.registerCommand('postgres-editor.refreshQueryHistory', () => {
+            queryHistoryView.refresh();
         }),
 
-        vscode.commands.registerCommand('postgres-editor.clearQueryHistory', async () => {
-            const confirmed = await vscode.window.showQuickPick(
-                [
-                    { label: '$(check) Clear All History', value: true },
-                    { label: '$(close) Cancel', value: false }
-                ],
-                { title: 'Clear Query History', placeHolder: 'This action cannot be undone' }
-            );
+        vscode.commands.registerCommand('postgres-editor.openSqlTerminal', async (item?: DatabaseTreeItem) => {
+            const connectionId = item?.connectionId;
+            await sqlTerminalProvider.openSqlTerminal(connectionId);
+        }),
 
-            if (confirmed?.value) {
-                await queryHistory.clearHistory();
-                vscode.window.showInformationMessage('Query history cleared');
+        vscode.commands.registerCommand('postgres-editor.manageIndexes', async (item?: DatabaseTreeItem) => {
+            if (!item || item.type !== 'table') {
+                vscode.window.showErrorMessage('Manage Indexes must be invoked on a table node.');
+                return;
             }
+
+            await indexManagerView.openIndexManager(item);
+        }),
+
+        vscode.commands.registerCommand('postgres-editor.managePermissions', async (item?: DatabaseTreeItem) => {
+            if (!item || item.type !== 'table') {
+                vscode.window.showErrorMessage('Manage Permissions must be invoked on a table node.');
+                return;
+            }
+
+            await permissionsManagerView.openPermissionsManager(item);
         }),
 
         treeView
