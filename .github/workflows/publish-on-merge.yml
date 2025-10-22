@@ -69,13 +69,43 @@ jobs:
       - name: Build extension
         run: npm run vscode:package
 
+      - name: Find generated VSIX
+        id: find_vsix
+        run: |
+          echo "Searching for .vsix files in the workspace..."
+          VSIX_PATH=$(find . -type f -name "*.vsix" | head -n 1 || true)
+          if [ -z "$VSIX_PATH" ]; then
+            echo "No .vsix file found" >&2
+            echo "vsix_found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Found VSIX: $VSIX_PATH"
+          echo "vsix_path=$VSIX_PATH" >> $GITHUB_OUTPUT
+          echo "vsix_found=true" >> $GITHUB_OUTPUT
+
       - name: Publish to Visual Studio Marketplace
         env:
           VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+        if: ${{ env.VSCE_TOKEN != '' }}
         run: |
-          if [ -z "$VSCE_TOKEN" ]; then
-            echo "VSCE_TOKEN secret is not set. Skipping publish.";
-            exit 1;
-          fi
-          # Publish the extension using the token. vsce reads the token via -p flag.
-          vsce publish -p "$VSCE_TOKEN"
+          echo "Publishing to Visual Studio Marketplace..."
+          npx vsce publish -p "$VSCE_TOKEN"
+
+      - name: Create GitHub Release for new tag
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ steps.bump-semver.outputs.new_version }}
+          release_name: ${{ steps.bump-semver.outputs.new_version }}
+          body: 'Release created by publish-on-merge workflow (automated).'
+          draft: false
+          prerelease: false
+
+      - name: Upload VSIX to GitHub Release
+        if: steps.find_vsix.outputs.vsix_found == 'true'
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_vsix.outputs.vsix_path }}
+          asset_name: ${{ steps.find_vsix.outputs.vsix_path }}
+          asset_content_type: application/octet-stream
