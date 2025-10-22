@@ -24,8 +24,10 @@
 
   function handleMessage(event: MessageEvent): void {
     const message = event.data;
+    console.log('[FKSelectorModal] Received message:', message);
 
     if (message.command === 'foreignKeyRows') {
+      console.log('[FKSelectorModal] Processing foreignKeyRows:', message.rows?.length, 'rows');
       fkData = {
         fkRows: message.rows || [],
         pkColumn: message.pkColumn || 'id',
@@ -33,26 +35,33 @@
       };
       loading = false;
     } else if (message.command === 'webviewError') {
+      console.log('[FKSelectorModal] Error received:', message.error);
       error = message.error?.message || 'An error occurred';
       loading = false;
     }
   }
 
   onMount(() => {
+    console.log('[FKSelectorModal] Component mounted, adding message listener');
     window.addEventListener('message', handleMessage);
     return () => {
+      console.log('[FKSelectorModal] Component unmounting, removing message listener');
       window.removeEventListener('message', handleMessage);
     };
   });
 
   async function openFKSelector(): Promise<void> {
+    console.log('[FKSelectorModal] openFKSelector called', { column, schemaName, tableName });
+    
     if (!column || !column.foreignKey) {
       error = 'Column is not a foreign key';
+      console.log('[FKSelectorModal] Column is not a foreign key:', column);
       return;
     }
 
     if (!vscode) {
       error = 'VS Code API not available';
+      console.log('[FKSelectorModal] VS Code API not available');
       return;
     }
 
@@ -61,6 +70,13 @@
     fkData = null;
     searchTerm = '';
     selectedRowValue = null;
+
+    console.log('[FKSelectorModal] Sending loadForeignKeyRows request:', {
+      command: 'loadForeignKeyRows',
+      schemaName,
+      tableName,
+      columnName: column.name
+    });
 
     // Request the FK rows from the extension
     vscode.postMessage({
@@ -254,12 +270,26 @@
 {/if}
 
 <style>
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
   .fk-selector-modal {
     display: flex;
     flex-direction: column;
     max-width: 700px;
     max-height: 80vh;
     width: 90%;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   }
 
   .modal-header {
@@ -268,12 +298,14 @@
     align-items: center;
     padding: 16px;
     border-bottom: 1px solid var(--vscode-panel-border);
+    flex-shrink: 0;
   }
 
   .modal-header h2 {
     margin: 0;
     font-size: 16px;
     font-weight: 500;
+    flex: 1;
   }
 
   .close-button {
@@ -288,6 +320,8 @@
     align-items: center;
     justify-content: center;
     border-radius: 4px;
+    flex-shrink: 0;
+    color: var(--vscode-foreground);
   }
 
   .close-button:hover {
@@ -422,6 +456,7 @@
     justify-content: flex-end;
     padding: 16px;
     border-top: 1px solid var(--vscode-panel-border);
+    flex-shrink: 0;
   }
 
   .ps-btn {

@@ -65,17 +65,31 @@ export class IndexManager {
                 ORDER BY i.indexname
             `, [tableName, schemaName || 'public']);
 
-            return result.rows.map(row => ({
-                name: row.indexname,
-                tableName: row.tablename,
-                schemaName: row.schema_name,
-                columns: row.columns || [],
-                indexType: row.type,
-                isUnique: row.indisunique,
-                isPrimary: row.indisprimary,
-                isValid: row.indisvalid,
-                sizeBytes: parseInt(row.size_bytes, 10)
-            }));
+            return result.rows.map(row => {
+                // Parse PostgreSQL array if it's a string like {col1,col2}
+                let columns: string[] = [];
+                if (Array.isArray(row.columns)) {
+                    columns = row.columns;
+                } else if (typeof row.columns === 'string') {
+                    // Parse PostgreSQL array format: {col1,col2,col3}
+                    const match = row.columns.match(/^\{(.*)\}$/);
+                    if (match) {
+                        columns = match[1].split(',').map((c: string) => c.trim());
+                    }
+                }
+                
+                return {
+                    name: row.indexname,
+                    tableName: row.tablename,
+                    schemaName: row.schema_name,
+                    columns,
+                    indexType: row.type,
+                    isUnique: row.indisunique,
+                    isPrimary: row.indisprimary,
+                    isValid: row.indisvalid,
+                    sizeBytes: parseInt(row.size_bytes, 10)
+                };
+            });
         } catch (err) {
             debug(`Error fetching indexes: ${err}`);
             throw err;

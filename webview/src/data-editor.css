@@ -699,7 +699,9 @@ textarea.invalid {
 
 .modal-header {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
   gap: 0.5rem;
 }
 
@@ -707,6 +709,14 @@ textarea.invalid {
   margin: 0;
   font-size: 1.25rem;
   color: var(--ps-text-primary);
+  flex: 1;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--ps-text-primary);
+  flex: 1;
 }
 
 .modal-body {

@@ -330,22 +330,31 @@ export class DataEditor {
                  WHERE t.relname = $1 AND n.nspname = $2 AND c.contype = 'f'`,
                 [tableName, schemaName || 'public']
             );
+            console.log(`[DataEditor] FK query returned ${fkResult.rows.length} rows for ${schemaName}.${tableName}`);
             const foreignKeys: Record<string, { referencedSchema: string; referencedTable: string; referencedColumn: string }> = {};
             for (const row of fkResult.rows) {
+                console.log(`[DataEditor] FK found: ${row.column_name} -> ${row.referenced_schema}.${row.referenced_table}.${row.referenced_column}`);
                 foreignKeys[row.column_name] = {
                     referencedSchema: row.referenced_schema,
                     referencedTable: row.referenced_table,
                     referencedColumn: row.referenced_column
                 };
             }
+            console.log(`[DataEditor] Final FK map:`, Object.keys(foreignKeys));
 
             // Enrich columns with constraint and index information
-            columns = columns.map(col => ({
-                ...col,
-                isUnique: uniqueColumns.has(col.name),
-                isIndexed: indexedColumns.has(col.name),
-                foreignKey: foreignKeys[col.name]
-            }));
+            columns = columns.map(col => {
+                const enriched = {
+                    ...col,
+                    isUnique: uniqueColumns.has(col.name),
+                    isIndexed: indexedColumns.has(col.name),
+                    foreignKey: foreignKeys[col.name]
+                };
+                if (col.name === 'conversation_id') {
+                    console.log(`[DataEditor] Enriching conversation_id:`, enriched.foreignKey);
+                }
+                return enriched;
+            });
 
             const offset = state.page * this.paginationSize;
             const qualifiedTable = `${this.quoteIdentifier(schemaName)}.${this.quoteIdentifier(tableName)}`;
@@ -569,6 +578,7 @@ export class DataEditor {
                 }
                 case 'loadForeignKeyRows': {
                     // Load rows from the foreign key referenced table
+                    console.log(`[DataEditor] Received loadForeignKeyRows for ${schemaName}.${tableName}.${message.columnName}`);
                     await this.loadForeignKeyRows(panel, connectionId, schemaName, tableName, message.columnName);
                     break;
                 }
@@ -856,9 +866,11 @@ export class DataEditor {
         tableName: string,
         columnName: string
     ): Promise<void> {
+        console.log(`[DataEditor] loadForeignKeyRows called for ${schemaName}.${tableName}.${columnName}`);
         try {
             const client = await this.connectionManager.getClient(connectionId);
             if (!client) {
+                console.log('[DataEditor] No client available');
                 panel.webview.postMessage({
                     command: 'webviewError',
                     error: { message: 'No active connection available' }
@@ -870,14 +882,19 @@ export class DataEditor {
 
             // First, get the column info to find the FK reference
             const cacheKey = `${connectionId}:${schemaName}.${tableName}`;
+            console.log(`[DataEditor] Looking for cache key: ${cacheKey}`);
             const cached = this.schemaCache.get(cacheKey);
             let column: ColumnInfo | undefined;
 
             if (cached) {
+                console.log(`[DataEditor] Cache found, searching for column ${columnName}`);
                 column = cached.columns.find(c => c.name === columnName);
+                console.log(`[DataEditor] Column found:`, column ? 'yes' : 'no', column?.foreignKey);
             } else {
                 // If not cached, we need to look it up
                 // For now, just return an error
+                console.log('[DataEditor] Cache not found for key:', cacheKey);
+                console.log('[DataEditor] Available cache keys:', Array.from(this.schemaCache.keys()));
                 panel.webview.postMessage({
                     command: 'webviewError',
                     error: { message: 'Column information not available' }
@@ -886,6 +903,7 @@ export class DataEditor {
             }
 
             if (!column || !column.foreignKey) {
+                console.log('[DataEditor] Column is not a foreign key or column not found');
                 panel.webview.postMessage({
                     command: 'webviewError',
                     error: { message: 'Column is not a foreign key' }
@@ -894,14 +912,17 @@ export class DataEditor {
             }
 
             const { referencedSchema, referencedTable, referencedColumn } = column.foreignKey;
+            console.log(`[DataEditor] FK references: ${referencedSchema}.${referencedTable}.${referencedColumn}`);
 
             // Query the referenced table to get rows (limit to 1000 for performance)
             const quotedSchema = `"${referencedSchema}"`;
             const quotedTable = `"${referencedTable}"`;
             const query = `SELECT * FROM ${quotedSchema}.${quotedTable} LIMIT 1000`;
+            console.log(`[DataEditor] Executing query: ${query}`);
 
             const result = await client.query(query);
             const rows = result.rows || [];
+            console.log(`[DataEditor] Query returned ${rows.length} rows`);
 
             // Find the primary key of the referenced table to return it
             const pkResult = await client.query(
@@ -920,7 +941,9 @@ export class DataEditor {
             if (pkResult.rows && pkResult.rows.length > 0) {
                 pkColumn = (pkResult.rows[0] as any).attname;
             }
+            console.log(`[DataEditor] Using PK column: ${pkColumn}`);
 
+            console.log('[DataEditor] Sending foreignKeyRows message to webview');
             panel.webview.postMessage({
                 command: 'foreignKeyRows',
                 rows,
@@ -929,6 +952,7 @@ export class DataEditor {
 
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
+            console.log('[DataEditor] Error loading FK rows:', errorMsg);
             panel.webview.postMessage({
                 command: 'webviewError',
                 error: { message: `Failed to load foreign key rows: ${errorMsg}` }
