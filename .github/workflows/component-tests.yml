@@ -1,10 +1,8 @@
 name: Component and Unit Tests
 
 on:
-  push:
-    branches: [ 'main', 'oct20', 'master' ]
   pull_request:
-    branches: [ 'main', 'oct20', 'master' ]
+    branches: [ 'main' ]
 
 jobs:
   tests:
