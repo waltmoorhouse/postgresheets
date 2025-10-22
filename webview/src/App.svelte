@@ -1192,13 +1192,38 @@
   }
 
   function copyToSqlTerminal(): void {
-    // Send message to extension to open SQL terminal and paste the SQL
-    ensureVscode().postMessage({
-      command: 'copyToSqlTerminal',
-      sql: sqlPreview
-    });
-    // Close the preview modal
-    closeSqlPreview();
+    // Normalize SQL into a single line for the SQL terminal.
+    // Steps:
+    // 1. Normalize CRLF to LF
+    // 2. Ensure semicolons are followed by a single space
+    // 3. Replace remaining newlines with spaces
+    // 4. Collapse multiple whitespace into single spaces and trim
+    // 5. Ensure the string ends with a semicolon
+    try {
+      let oneLine = String(sqlPreview || '');
+      oneLine = oneLine.replace(/\r\n?/g, '\n');
+      // Ensure semicolons are followed by a single space (handles ";\n" and ";  \n" and ";\t")
+      oneLine = oneLine.replace(/;[ \t\f\v]*\n+/g, '; ');
+      oneLine = oneLine.replace(/;[ \t\f\v]+/g, '; ');
+      // Collapse remaining newlines into spaces
+      oneLine = oneLine.replace(/\n+/g, ' ');
+      // Collapse multiple spaces into one
+      oneLine = oneLine.replace(/\s+/g, ' ').trim();
+      if (oneLine && !oneLine.endsWith(';')) {
+        oneLine = oneLine + ';';
+      }
+
+      ensureVscode().postMessage({
+        command: 'copyToSqlTerminal',
+        sql: oneLine
+      });
+    } catch (e) {
+      // Fallback to original preview if anything goes wrong
+      ensureVscode().postMessage({ command: 'copyToSqlTerminal', sql: sqlPreview });
+    } finally {
+      // Close the preview modal
+      closeSqlPreview();
+    }
   }
 
   function executeFromPreview(): void {
