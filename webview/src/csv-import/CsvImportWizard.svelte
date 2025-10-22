@@ -470,7 +470,8 @@
 		border-radius: 4px;
 		overflow: auto;
 		margin: 1rem 0;
-		max-height: 300px;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.mapping-header {

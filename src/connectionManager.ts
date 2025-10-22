@@ -29,6 +29,8 @@ export class ConnectionManager {
     private pendingConnections: Map<string, Promise<Client | null>> = new Map();
     // Controllers to allow cancelling pending connection attempts
     private pendingControllers: Map<string, AbortController> = new Map();
+    // Track connections that were explicitly cancelled by the user to prevent auto-retry
+    private cancelledConnections: Set<string> = new Set();
     private statusEmitter = new vscode.EventEmitter<{ id: string; status: ConnectionStatus }>();
 
     readonly onStatusChange = this.statusEmitter.event;
@@ -344,8 +346,15 @@ export class ConnectionManager {
             return this.connections.get(id)!;
         }
 
+        // If this connection was explicitly cancelled by the user, don't auto-retry
+        if (!forceReconnect && this.cancelledConnections.has(id)) {
+            return null;
+        }
+
         if (forceReconnect) {
             await this.disconnect(id);
+            // If forcing a reconnect, clear the cancelled flag
+            this.cancelledConnections.delete(id);
         }
 
         const pending = this.pendingConnections.get(id);
@@ -500,6 +509,8 @@ export class ConnectionManager {
             }
         }
         this.setStatus(id, 'disconnected');
+        // Clear the cancelled flag when explicitly disconnecting
+        this.cancelledConnections.delete(id);
     }
 
     async refreshConnection(id: string): Promise<Client | null> {
@@ -539,6 +550,8 @@ export class ConnectionManager {
         this.pendingControllers.delete(id);
         this.pendingConnections.delete(id);
         this.setStatus(id, 'disconnected');
+        // Mark this connection as explicitly cancelled so it won't auto-retry
+        this.cancelledConnections.add(id);
         // (Removed test-only debug logging)
         return true;
     }
