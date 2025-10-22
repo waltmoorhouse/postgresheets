@@ -867,12 +867,42 @@
   }
 
   function setColumnWidth(columnName: string, width: number): void {
+    // Update the state reactively
     columnWidths = { ...columnWidths, [columnName]: width };
+    
+    // Also update DOM directly for immediate visual feedback
     const header = headerRefs[columnName];
     if (header) {
       header.style.width = `${width}px`;
       header.style.minWidth = `${width}px`;
       header.style.maxWidth = `${width}px`;
+    }
+    
+    // Update all cells in this column
+    const table = document.querySelector('.data-table');
+    if (table) {
+      const colIndex = visibleColumns.findIndex(col => col.name === columnName);
+      if (colIndex >= 0) {
+        // Update header cells (including filter row)
+        const headerCells = table.querySelectorAll(`thead th:nth-child(${colIndex + 2})`);
+        headerCells.forEach((cell: Element) => {
+          if (cell instanceof HTMLElement) {
+            cell.style.width = `${width}px`;
+            cell.style.minWidth = `${width}px`;
+            cell.style.maxWidth = `${width}px`;
+          }
+        });
+        
+        // Update body cells
+        const bodyCells = table.querySelectorAll(`tbody td:nth-child(${colIndex + 2})`);
+        bodyCells.forEach((cell: Element) => {
+          if (cell instanceof HTMLElement) {
+            cell.style.width = `${width}px`;
+            cell.style.minWidth = `${width}px`;
+            cell.style.maxWidth = `${width}px`;
+          }
+        });
+      }
     }
   }
 

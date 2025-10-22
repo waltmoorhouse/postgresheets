@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, createEventDispatcher } from 'svelte';
   import type { ColumnInfo, RowData, VSCodeApi } from './lib/types';
+
+  const dispatch = createEventDispatcher();
 
   interface ForeignKeySelection {
     fkRows: RowData[];
@@ -70,7 +72,7 @@
   }
 
   function closeFKSelector(): void {
-    isOpen = false;
+    dispatch('close');
     fkData = null;
     error = '';
     loading = false;
@@ -85,10 +87,12 @@
   function confirmSelection(): void {
     if (selectedRowValue !== null) {
       // Dispatch custom event to parent with the selected value
-      dispatchEvent(new CustomEvent('fkSelected', {
-        detail: { value: selectedRowValue }
-      }));
-      closeFKSelector();
+      dispatch('fkSelected', { value: selectedRowValue });
+      fkData = null;
+      error = '';
+      loading = false;
+      searchTerm = '';
+      selectedRowValue = null;
     }
   }
 

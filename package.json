@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "2.0.10",
+  "version": "2.0.11",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {

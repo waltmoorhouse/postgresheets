@@ -45,7 +45,7 @@ export class IndexManager {
                     ix.indisunique,
                     ix.indisprimary,
                     ix.indisvalid,
-                    pg_relation_size(i.indexoid) as size_bytes,
+                    pg_relation_size(ic.oid) as size_bytes,
                     CASE 
                         WHEN ix.indisprimary THEN 'PRIMARY KEY'
                         WHEN ix.indisunique THEN 'UNIQUE'
@@ -61,7 +61,7 @@ export class IndexManager {
                 JOIN pg_attribute a ON a.attrelid = tc.oid AND a.attnum = ANY(ix.indkey)
                 WHERE tc.relname = $1 AND n.nspname = $2
                 GROUP BY i.indexname, tc.relname, n.nspname, ix.indisunique, 
-                         ix.indisprimary, ix.indisvalid, i.indexoid, am.amname
+                         ix.indisprimary, ix.indisvalid, ic.oid, am.amname
                 ORDER BY i.indexname
             `, [tableName, schemaName || 'public']);
 
