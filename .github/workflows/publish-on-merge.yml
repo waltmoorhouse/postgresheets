@@ -54,11 +54,10 @@ jobs:
           message: '${{ steps.bump-semver.outputs.new_version }}: PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.title }}'
 
       - name: Install dependencies
-        run: npm ci
-
-      - name: Install webview dependencies
-        working-directory: ./webview
-        run: npm ci
+        run: |
+          npm install -D svelte-preprocess
+          npm ci
+          npm ci --prefix webview
 
       - name: Build webview assets
         working-directory: ./webview
