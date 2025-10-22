@@ -358,6 +358,11 @@ export class DataEditor {
                 return enriched;
             });
 
+            // UPDATE CACHE with enriched columns so loadForeignKeyRows finds them
+            cached = { columns, columnsResultRows, enumLabelsByOid };
+            this.schemaCache.set(cacheKey, cached);
+            console.log(`[DataEditor] Updated cache with enriched columns`);
+
             const offset = state.page * this.paginationSize;
             const qualifiedTable = `${this.quoteIdentifier(schemaName)}.${this.quoteIdentifier(tableName)}`;
 

@@ -302,47 +302,64 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             try {
-                // Ask user if they want to include headers
-                const includeHeaders = await vscode.window.showQuickPick(
-                    [
-                        { label: '$(check) Include Headers', picked: true, value: true },
-                        { label: '$(close) Without Headers', picked: false, value: false }
-                    ],
-                    {
-                        title: 'CSV Export Options',
-                        placeHolder: 'Include column headers in export?',
-                        canPickMany: false
-                    }
-                );
-
-                if (includeHeaders === undefined) {
-                    return; // User cancelled
-                }
-
-                // Get table data from data editor
                 const tableName = item.label as string;
                 const connectionId = item.connectionId;
+                const schemaName = item.schemaName;
 
                 if (!connectionId) {
                     vscode.window.showErrorMessage('Could not determine connection for table export');
                     return;
                 }
 
-                // Open table to get data
-                const result = await vscode.window.withProgress(
-                    {
-                        location: vscode.ProgressLocation.Notification,
-                        title: `Exporting ${tableName} as CSV...`,
-                        cancellable: false
-                    },
-                    async () => {
-                        // This will be called from the data editor via postMessage
-                        // For now, we'll show a message that the export button should be used in the UI
-                        return null;
-                    }
-                );
+                // Get the client to query table data
+                const client = await connectionManager.getClient(connectionId);
+                if (!client) {
+                    vscode.window.showErrorMessage('Could not connect to database');
+                    return;
+                }
 
-                vscode.window.showInformationMessage('Use the Export CSV button in the data editor toolbar to export table data.');
+                try {
+                    // Query all data from the table
+                    const quotedSchema = `"${schemaName || 'public'}"`;
+                    const quotedTable = `"${tableName}"`;
+                    const result = await client.query(`SELECT * FROM ${quotedSchema}.${quotedTable}`);
+                    const rows = result.rows;
+
+                    if (rows.length === 0) {
+                        vscode.window.showWarningMessage(`Table ${tableName} is empty`);
+                        return;
+                    }
+
+                    // Ask if user wants headers
+                    const includeHeaders = await vscode.window.showQuickPick(
+                        ['Yes', 'No'],
+                        { placeHolder: 'Include column headers in CSV?' }
+                    );
+
+                    if (includeHeaders === undefined) {
+                        return; // User cancelled
+                    }
+
+                    // Get column names from first row
+                    const columnNames = Object.keys(rows[0]);
+                    
+                    // Convert rows to arrays
+                    const rowArrays = rows.map(row => columnNames.map(col => row[col]));
+
+                    // Export to CSV file
+                    const savedPath = await CsvExporter.exportToFile(
+                        columnNames,
+                        rowArrays,
+                        tableName,
+                        { includeHeaders: includeHeaders === 'Yes' }
+                    );
+
+                    if (savedPath) {
+                        vscode.window.showInformationMessage(`Table exported successfully to ${savedPath}`);
+                    }
+                } finally {
+                    connectionManager.markIdle(connectionId);
+                }
             } catch (error) {
                 vscode.window.showErrorMessage(`Failed to export table: ${error}`);
             }
@@ -507,8 +524,9 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        vscode.commands.registerCommand('postgres-editor.viewQueryHistory', () => {
-            // Make the query history panel visible by posting a refresh message
+        vscode.commands.registerCommand('postgres-editor.viewQueryHistory', async () => {
+            // Reveal the query history panel
+            await vscode.commands.executeCommand('postgresQueryHistory.focus');
             queryHistoryView.refresh();
         }),
 
