@@ -21,7 +21,8 @@ export default defineConfig({
         'schema-designer/main': path.resolve(__dirname, './src/schema-designer/main.ts'),
         'create-table/main': path.resolve(__dirname, './src/create-table/main.ts'),
         'drop-table/main': path.resolve(__dirname, './src/drop-table/main.ts'),
-        'add-connection/main': path.resolve(__dirname, './src/add-connection/main.ts')
+        'add-connection/main': path.resolve(__dirname, './src/add-connection/main.ts'),
+        'csv-import/main': path.resolve(__dirname, './src/csv-import/main.ts')
       },
       output: {
         entryFileNames: '[name].js',

@@ -14,6 +14,25 @@ All notable changes to this project will be documented in this file.
   - Added comprehensive types file (`src/types.ts`) for all webview message types and data structures
 
 ### Added
+- **CSV Import Wizard (GUI)**: Replaced command-line CSV import with a user-friendly multi-step wizard. Features:
+  - Visual column mapping interface with side-by-side CSV and database columns
+  - Automatic header detection with toggle option
+  - Real-time preview of first 5 rows with type conversion results
+  - Built-in validation using existing validation rules (detects NULL violations, type mismatches, etc.)
+  - Retry capability - users can adjust mappings and try again without restarting
+  - Color-coded preview showing validation errors
+  - Step-by-step wizard UI: Headers → Mapping → Preview → Validation → Import
+  - Automatic tree refresh on successful import
+- **DateTime/Date/Time Picker Modal**: Professional date/time editor for temporal types. Features:
+  - Dedicated modal for editing `timestamp`, `timestamp with time zone`, `date`, and `time` columns
+  - Native date input for date selection
+  - Native time input with seconds precision
+  - Timezone selector for `timestamp with time zone` columns (includes 13 common timezones)
+  - "Now" button to populate current date/time
+  - Clear button to set value to NULL
+  - Preview of current value in code format
+  - Available via 📅 calendar button on temporal column cells
+  - Keyboard support: Enter to save, Escape to close
 - **CSV Export with Headers**: Users can now export table data to CSV format with optional column headers. Includes accessible file picker dialog and keyboard navigation. Features:
   - Toggle header inclusion via quick pick
   - Proper RFC 4180 CSV formatting with quote escaping
@@ -49,6 +68,7 @@ All notable changes to this project will be documented in this file.
 - **Enhanced row selection**: Multi-row Shift+Click selection now includes keyboard hints and full keyboard support
 - **Pagination navigation landmarks**: Pagination controls now marked as navigation regions with proper ARIA attributes
 - **Search and filter accessibility**: Search inputs include proper labels, ARIA attributes, and help text
+
 - **Data table semantics**: Tables now use proper ARIA roles (grid) with column headers and cell relationships
 - **Focus management improvements**: All interactive elements have clear, visible focus indicators with proper tab order
 - **Input validation accessibility**: Form validation errors properly associated with inputs via aria-describedby with immediate announcements

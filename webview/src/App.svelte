@@ -3,6 +3,7 @@
   import ColumnManager from './ColumnManager.svelte';
   import HiddenColumnsModal from './HiddenColumnsModal.svelte';
   import FKSelectorModal from './FKSelectorModal.svelte';
+  import DateTimeModal from './DateTimeModal.svelte';
   import FocusTrap from '$lib/components/FocusTrap.svelte';
   import { clsx } from 'clsx';
   import type {
@@ -148,6 +149,12 @@
   let fkSelectorRow: RowState | null = null;
   let fkSelectorColumn: ColumnInfo | null = null;
   let currentConnectionId = '';
+
+  // DateTime modal state
+  let dateTimeModalOpen = false;
+  let dateTimeRow: RowState | null = null;
+  let dateTimeColumn: ColumnInfo | null = null;
+  let dateTimeValue: string = '';
 
   function deepClone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
@@ -818,6 +825,45 @@
     closeFKSelector();
   }
 
+  function openDateTimeModal(row: RowState, column: ColumnInfo): void {
+    const isTimestampType = column.type && /timestamp|date|time/i.test(column.type);
+    if (!isTimestampType) {
+      return;
+    }
+    dateTimeModalOpen = true;
+    dateTimeRow = rows.find((current) => current.id === row.id) ?? row;
+    dateTimeColumn = column;
+    dateTimeValue = String(row.current[column.name] ?? '');
+  }
+
+  function closeDateTimeModal(): void {
+    dateTimeModalOpen = false;
+    dateTimeRow = null;
+    dateTimeColumn = null;
+    dateTimeValue = '';
+  }
+
+  function handleDateTimeSaved(value: string): void {
+    if (!dateTimeRow || !dateTimeColumn) {
+      return;
+    }
+    const { name } = dateTimeColumn;
+    const updatedRows = rows.map((row) => {
+      if (row.id !== dateTimeRow?.id) {
+        return row;
+      }
+      return {
+        ...row,
+        current: {
+          ...row.current,
+          [name]: value || null
+        }
+      };
+    });
+    rows = updatedRows;
+    closeDateTimeModal();
+  }
+
   function toggleSort(column: ColumnInfo): void {
     let next: SortDescriptor | null = null;
     if (!activeSort || activeSort.column !== column.name) {
@@ -1464,6 +1510,16 @@
       />
     {/if}
 
+    {#if dateTimeModalOpen && dateTimeColumn}
+      <DateTimeModal
+        isOpen={dateTimeModalOpen}
+        value={dateTimeValue}
+        columnType={dateTimeColumn.type}
+        onClose={closeDateTimeModal}
+        onSave={handleDateTimeSaved}
+      />
+    {/if}
+
     <section class="toolbar">
       <div class="toolbar-group toolbar-search">
         <input
@@ -1669,6 +1725,32 @@
                         title="Browse and select from referenced table"
                       >
                         🔗
+                      </button>
+                      <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
+                    </div>
+                  </td>
+                {:else if /timestamp|date|time/i.test(column.type)}
+                    {@const err = row.validation?.[column.name]}
+                  <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
+                    <div class="cell-edit">
+                      <input
+                        type="text"
+                        value={formatCellValue(row.current[column.name], column)}
+                        disabled={row.deleted}
+                        on:input={(event) => handleTextInput(row, column, event)}
+                        class="cell-input"
+                        aria-invalid={err ? 'true' : 'false'}
+                        aria-describedby={err ? errorId(row.id, column.name) : undefined}
+                        placeholder="Enter date/time or click..."
+                      >
+                      <button
+                        type="button"
+                        class="ps-btn ps-btn--icon text-expand-button"
+                        disabled={row.deleted}
+                        on:click={() => openDateTimeModal(row, column)}
+                        title="Open date/time picker"
+                      >
+                        📅
                       </button>
                       <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
                     </div>

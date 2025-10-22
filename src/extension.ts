@@ -6,6 +6,7 @@ import { SchemaDesigner } from './schemaDesigner';
 import { CreateTableWizard } from './createTableWizard';
 import { DropTableWizard } from './dropTableWizard';
 import { CsvExporter } from './csvExporter';
+import { CsvImportWizard } from './csvImportWizard';
 import { QueryHistory } from './queryHistory';
 import { QueryHistoryView } from './queryHistoryView';
 import { SqlTerminalProvider } from './sqlTerminalProvider';
@@ -366,161 +367,11 @@ export function activate(context: vscode.ExtensionContext) {
         }),
 
         vscode.commands.registerCommand('postgres-editor.importTableFromCSV', async (item?: DatabaseTreeItem) => {
-            if (!item || item.type !== 'table') {
-                vscode.window.showErrorMessage('Import from CSV must be invoked on a table node.');
-                return;
-            }
-
             try {
-                const tableName = item.label as string;
-                const connectionId = item.connectionId;
-                const schemaName = item.schemaName;
-
-                if (!connectionId) {
-                    vscode.window.showErrorMessage('Could not determine connection for table import');
-                    return;
-                }
-
-                // Import CSV file
-                const csvData = await CsvExporter.importFromFile();
-                if (!csvData) {
-                    return; // User cancelled
-                }
-
-                // Get table structure to show column mapping options
-                const client = await connectionManager.getClient(connectionId);
-                if (!client) {
-                    vscode.window.showErrorMessage('Could not connect to database');
-                    return;
-                }
-
-                try {
-                    // Fetch table columns
-                    const columnsResult = await client.query(`
-                        SELECT column_name, data_type
-                        FROM information_schema.columns
-                        WHERE table_schema = $1 AND table_name = $2
-                        ORDER BY ordinal_position
-                    `, [schemaName || 'public', tableName]);
-
-                    const tableColumns = columnsResult.rows.map(row => ({
-                        name: row.column_name,
-                        type: row.data_type
-                    }));
-
-                    if (tableColumns.length === 0) {
-                        vscode.window.showErrorMessage(`Could not find columns for table ${tableName}`);
-                        return;
-                    }
-
-                    // Detect if first row is headers
-                    const firstRowIsHeader = await vscode.window.showQuickPick(
-                        [
-                            { label: '$(check) First row contains headers', picked: true, value: true },
-                            { label: '$(close) First row is data', picked: false, value: false }
-                        ],
-                        { title: 'CSV Import', placeHolder: 'Is the first row column headers?' }
-                    );
-
-                    if (firstRowIsHeader === undefined) {
-                        return; // User cancelled
-                    }
-
-                    let dataRows = csvData.rows;
-                    let csvHeaders: string[] = [];
-
-                    if (firstRowIsHeader && dataRows.length > 0) {
-                        csvHeaders = dataRows[0];
-                        dataRows = dataRows.slice(1);
-                    }
-
-                    if (dataRows.length === 0) {
-                        vscode.window.showErrorMessage('No data rows found in CSV');
-                        return;
-                    }
-
-                    // Create column mapping
-                    const columnMapping: Record<number, string> = {};
-
-                    if (csvHeaders.length > 0) {
-                        // Auto-map headers to table columns
-                        for (let i = 0; i < csvHeaders.length; i++) {
-                            const header = csvHeaders[i].trim();
-                            const tableCol = tableColumns.find(c => c.name.toLowerCase() === header.toLowerCase());
-                            if (tableCol) {
-                                columnMapping[i] = tableCol.name;
-                            }
-                        }
-                    } else {
-                        // Auto-map by position if no headers
-                        for (let i = 0; i < Math.min(dataRows[0].length, tableColumns.length); i++) {
-                            columnMapping[i] = tableColumns[i].name;
-                        }
-                    }
-
-                    // Show mapping confirmation
-                    const mappedColumns = Object.entries(columnMapping)
-                        .map(([idx, col]) => `Column ${parseInt(idx) + 1} → ${col}`)
-                        .join('\n');
-
-                    const confirmImport = await vscode.window.showQuickPick(
-                        [
-                            { label: `$(check) Import ${dataRows.length} rows`, value: true },
-                            { label: '$(close) Cancel', value: false }
-                        ],
-                        { 
-                            title: 'CSV Import Confirmation',
-                            placeHolder: `Mapping:\n${mappedColumns}`,
-                            canPickMany: false
-                        }
-                    );
-
-                    if (!confirmImport?.value) {
-                        return;
-                    }
-
-                    // Convert types and prepare data
-                    const typedRows = dataRows.map(row => {
-                        const typedRow: Record<string, unknown> = {};
-                        for (const [csvIdx, tableCol] of Object.entries(columnMapping)) {
-                            const idx = parseInt(csvIdx);
-                            const colDef = tableColumns.find(c => c.name === tableCol);
-                            if (idx < row.length && colDef) {
-                                typedRow[tableCol] = CsvExporter.convertValue(row[idx], colDef.type);
-                            }
-                        }
-                        return typedRow;
-                    });
-
-                    // Build INSERT statements
-                    const columns = Object.values(columnMapping);
-                    const insertStatements = typedRows.map((row, idx) => {
-                        const values = columns.map(col => row[col] ?? null);
-                        const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
-                        const sql = `INSERT INTO "${schemaName || 'public'}"."${tableName}" (${columns.map(c => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
-                        return { sql, values };
-                    });
-
-                    // Execute imports in a transaction
-                    await client.query('BEGIN');
-                    try {
-                        for (const stmt of insertStatements) {
-                            await client.query(stmt.sql, stmt.values);
-                        }
-                        await client.query('COMMIT');
-                        vscode.window.showInformationMessage(`Successfully imported ${dataRows.length} rows into ${tableName}`);
-                        
-                        // Refresh tree view
-                        treeProvider.refresh();
-                    } catch (error) {
-                        await client.query('ROLLBACK');
-                        throw error;
-                    }
-                } catch (error) {
-                    vscode.window.showErrorMessage(`Import failed: ${error}`);
-                }
+                const csvImportWizard = new CsvImportWizard(context, connectionManager, () => treeProvider.refresh());
+                await csvImportWizard.openWizard(item || ({} as DatabaseTreeItem));
             } catch (error) {
-                vscode.window.showErrorMessage(`Failed to import CSV: ${error}`);
+                vscode.window.showErrorMessage(`Failed to open CSV import wizard: ${error}`);
             }
         }),
 
