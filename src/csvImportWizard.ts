@@ -110,8 +110,11 @@ export class CsvImportWizard {
 			const scriptUri = panel.webview.asWebviewUri(
 				vscode.Uri.joinPath(this.context.extensionUri, 'media', 'csv-import', 'main.js')
 			);
-			const styleUri = panel.webview.asWebviewUri(
+			const globalStyleUri = panel.webview.asWebviewUri(
 				vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css')
+			);
+			const wizardStyleUri = panel.webview.asWebviewUri(
+				vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main6.css')
 			);
 
 			panel.webview.html = `<!doctype html>
@@ -120,7 +123,8 @@ export class CsvImportWizard {
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="${styleUri}">
+	  <link rel="stylesheet" href="${globalStyleUri}">
+	  <link rel="stylesheet" href="${wizardStyleUri}">
   <title>Import CSV</title>
 </head>
 <body>

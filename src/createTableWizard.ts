@@ -163,7 +163,7 @@ export class CreateTableWizard {
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'create-table', 'main.js')
         );
         const baseStyleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'index.css')
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css')
         );
         const appStyleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main3.css')

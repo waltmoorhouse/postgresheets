@@ -765,7 +765,7 @@ export class DataEditor {
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'data-editor', 'main.js')
         );
         const baseStyleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'index.css')
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css')
         );
         const appStyleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css')

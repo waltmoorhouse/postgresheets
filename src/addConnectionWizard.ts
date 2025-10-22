@@ -31,14 +31,16 @@ export class AddConnectionWizard {
         // Try to load the built Svelte bundle from the extension's media
         try {
             const scriptUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'add-connection', 'main.js'));
-            const styleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css'));
+            const globalStyleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css'));
+            const wizardStyleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main5.css'));
             panel.webview.html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="${styleUri}">
+  <link rel="stylesheet" href="${globalStyleUri}">
+  <link rel="stylesheet" href="${wizardStyleUri}">
   <title>Add Connection</title>
 </head>
 <body>
