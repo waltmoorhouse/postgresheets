@@ -110,3 +110,4 @@ try {
 ## Changelog
 - Always update CHANGELOG.md when adding features or fixing major bugs
 - Always ensure the KNOWN_ISSUES, README, MANUAL_TESTING_CHECKLIST, and TESTING docs are updated when necessary.
+- NEVER output multiple new documents. When you document something, use existing documents. If you feel like you will need to create an additional document, ALWAYS ask the user first.
