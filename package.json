@@ -2,12 +2,12 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "2.0.7",
+  "version": "2.0.9",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
     "type": "git",
-    "url": "git@github.com:waltmoorhouse/postgresheets.git"
+    "url": "https://github.com/waltmoorhouse/postgresheets.git"
   },
   "engines": {
     "vscode": "^1.80.0"

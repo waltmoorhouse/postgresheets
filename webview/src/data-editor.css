@@ -177,6 +177,8 @@
   font-size: 0.9rem;
   overflow: auto;
   max-height: 40vh;
+  white-space: pre;
+  word-wrap: break-word;
 }
 
 .cell-edit {

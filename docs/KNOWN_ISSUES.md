@@ -97,7 +97,28 @@
    - Features: Auto-detection of headers, intelligent column mapping, type conversion (boolean, integer, float, date, timestamp, JSON, UUID), transaction-based import, 32 comprehensive tests
    - Access: Right-click table → "Import from CSV"
 
-4. **Connection Pooling Configuration**
+4. **Foreign Key Indicators and Mini-View** 🔄 PLANNED
+   - Status: Not yet implemented
+   - Impact: Users can see which columns are foreign keys and select valid values without opening related table in separate tab
+   - Planned Features:
+     - Visual FK icon indicator next to column name in header
+     - When editing FK column, display a mini-view/dropdown of the referenced table's rows
+     - Click to select a row and set its primary key as the FK value
+     - Reduces context switching and improves data entry workflow
+   - Effort: Medium (2-3 days)
+   - Requirements: Fetch FK metadata from `information_schema.key_column_usage`, extend `ColumnInfo` interface, build mini-view component
+
+5. **Column Constraint Indicators (UNIQUE, INDEX)** 🔄 PLANNED
+   - Status: Not yet implemented
+   - Impact: Users can see which columns have UNIQUE constraints or indexes at a glance
+   - Planned Features:
+     - Visual icons next to column names in header
+     - Index icon clickable to open Index Manager (same as right-click → "Manage Indexes")
+     - Helps identify natural keys, indexed search columns, and performance-critical columns
+   - Effort: Medium (2-3 days)
+   - Requirements: Fetch constraint/index metadata from `pg_indexes` and `information_schema.key_column_usage`, extend `ColumnInfo` interface, add icon indicators to column headers
+
+6. **Connection Pooling Configuration**
    - Status: Basic pooling exists but not configurable
    - Impact: Cannot tune for specific workloads
    - Effort: Small (1 day)

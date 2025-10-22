@@ -10,6 +10,16 @@ export interface ColumnInfo {
   nullable: boolean;
   // When populated, lists valid enum labels for enum-typed columns
   enumValues?: string[];
+  // Indicates if column is unique
+  isUnique?: boolean;
+  // Indicates if column is indexed
+  isIndexed?: boolean;
+  // Foreign key reference info (if any)
+  foreignKey?: {
+    referencedSchema: string;
+    referencedTable: string;
+    referencedColumn: string;
+  };
 }
 
 export interface PrimaryKeyInfo {

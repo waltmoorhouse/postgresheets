@@ -459,10 +459,47 @@
     });
   }
 
+  function generateUUID(): string {
+    // Generate a random UUID v4
+    // https://developer.mozilla.org/en-US/docs/Web/API/crypto/getRandomValues
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    // Set version to 4 (random)
+    array[6] = (array[6] & 0x0f) | 0x40;
+    // Set variant to RFC 4122
+    array[8] = (array[8] & 0x3f) | 0x80;
+    const hex = Array.from(array).map((x) => x.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
   function addRow(): void {
     const baseline: Record<string, unknown> = {};
     columns.forEach((column) => {
       baseline[column.name] = null;
+    });
+    rows = [
+      ...rows,
+      {
+        id: Date.now(),
+        original: deepClone(baseline),
+        current: deepClone(baseline),
+        selected: false,
+        isNew: true,
+        deleted: false
+        ,validation: {}
+      }
+    ];
+  }
+
+  function addRowWithUUID(): void {
+    const baseline: Record<string, unknown> = {};
+    columns.forEach((column) => {
+      // Fill UUID primary key columns with generated UUIDs
+      if (primaryKey.includes(column.name) && column.type.toLowerCase() === 'uuid') {
+        baseline[column.name] = generateUUID();
+      } else {
+        baseline[column.name] = null;
+      }
     });
     rows = [
       ...rows,
@@ -483,7 +520,29 @@
     // Allow empty strings as null-ish values
     if (typeof value === 'string' && value.trim().length === 0) return null;
     const baseType = String(column.type).replace(/\[\]$/, '').toLowerCase();
-    if (baseType === 'json' || baseType === 'jsonb') return null;
+    
+    // UUID validation
+    if (baseType === 'uuid') {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (typeof value === 'string' && !uuidRegex.test(value)) {
+        return 'Invalid UUID format (expected: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)';
+      }
+      return null;
+    }
+    
+    // JSON/JSONB validation
+    if (baseType === 'json' || baseType === 'jsonb') {
+      if (typeof value === 'string') {
+        try {
+          JSON.parse(value);
+          return null;
+        } catch {
+          return 'Invalid JSON';
+        }
+      }
+      return null;
+    }
+    
     // Integers
     if (baseType.includes('int') || baseType === 'bigint' || baseType === 'smallint' || baseType === 'integer') {
       const s = String(value).trim();
@@ -1256,6 +1315,11 @@
           <span>Bypass validation</span>
         </label>
         <button type="button" class="ps-btn ps-btn--primary" on:click={addRow}>Add row</button>
+        {#if primaryKey.length > 0 && columns.some((c) => primaryKey.includes(c.name) && c.type.toLowerCase() === 'uuid')}
+          <button type="button" class="ps-btn ps-btn--primary" on:click={addRowWithUUID} title="Add a new row with auto-generated UUID primary key">
+            Add row (UUID)
+          </button>
+        {/if}
         <button
           type="button"
           class="ps-btn ps-btn--ghost"
@@ -1295,7 +1359,6 @@
             <h2 id="column-manager-heading" class="sr-only">Manage Columns</h2>
             <ColumnManager
               items={columns.map((c) => ({ name: c.name, type: c.type, visible: !hiddenColumnsSet.has(c.name) }))}
-              on:change={handleColumnManagerChange}
               on:save={handleColumnManagerSave}
               on:reset={() => resetPreferences()}
               on:cancel={() => columnManagerOpen = false}
@@ -1321,6 +1384,12 @@
           placeholder="Search this table…"
           bind:value={searchTerm}
           on:keydown={(event) => event.key === 'Enter' && executeSearch()}
+          on:search={() => {
+            // Handle native browser clear button (X in search inputs)
+            if (!searchTerm || searchTerm.trim().length === 0) {
+              executeSearch();
+            }
+          }}
         >
         <button type="button" class="ps-btn ps-btn--ghost" on:click={executeSearch}>Search</button>
       </div>
@@ -1379,8 +1448,6 @@
                     type="button"
                     class="resize-handle"
                     tabindex="0"
-                    role="separator"
-                    aria-orientation="vertical"
                     aria-label={`Resize ${column.name} column. Use arrow keys to adjust width.`}
                     on:pointerdown={(event) => startResize(column, event)}
                     on:mousedown={(event) => startResize(column, event)}

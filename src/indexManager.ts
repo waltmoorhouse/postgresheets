@@ -39,7 +39,7 @@ export class IndexManager {
             const result = await client.query(`
                 SELECT 
                     i.indexname,
-                    t.tablename,
+                    tc.relname as tablename,
                     n.nspname as schema_name,
                     array_agg(a.attname ORDER BY a.attnum) as columns,
                     ix.indisunique,
@@ -52,15 +52,15 @@ export class IndexManager {
                         ELSE am.amname
                     END as type
                 FROM pg_indexes i
-                JOIN pg_index ix ON ix.indexrelname = i.indexname
-                JOIN pg_class ic ON ic.oid = ix.indexrelid
-                JOIN pg_namespace n ON n.oid = ic.relnamespace
-                JOIN pg_am am ON am.oid = ic.relam
+                JOIN pg_class ic ON ic.relname = i.indexname
+                JOIN pg_namespace icn ON icn.oid = ic.relnamespace
+                JOIN pg_index ix ON ix.indexrelid = ic.oid
                 JOIN pg_class tc ON tc.oid = ix.indrelid
-                JOIN pg_tables t ON t.tablename = tc.relname AND t.schemaname = n.nspname
+                JOIN pg_namespace n ON n.oid = tc.relnamespace
+                JOIN pg_am am ON am.oid = ic.relam
                 JOIN pg_attribute a ON a.attrelid = tc.oid AND a.attnum = ANY(ix.indkey)
-                WHERE t.tablename = $1 AND n.nspname = $2
-                GROUP BY i.indexname, t.tablename, n.nspname, ix.indisunique, 
+                WHERE tc.relname = $1 AND n.nspname = $2
+                GROUP BY i.indexname, tc.relname, n.nspname, ix.indisunique, 
                          ix.indisprimary, ix.indisvalid, i.indexoid, am.amname
                 ORDER BY i.indexname
             `, [tableName, schemaName || 'public']);
