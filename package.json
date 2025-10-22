@@ -291,9 +291,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --config=jest.config.cjs",
-    "test:components": "jest --testPathPattern=./test/.*\\.(spec|test)\\.(ts|js)$",
+  "test:components": "jest --testPathPatterns='./test/.*\\.(spec|test)\\.(ts|js)$'",
     "test:prepare-webview": "npm ci --prefix webview",
-    "test:components:ci": "npm run test:prepare-webview && node --experimental-vm-modules node_modules/.bin/jest --config=jest.config.cjs --testPathPattern=./test/.*\\.(spec|test)\\.(ts|js)$",
+  "test:components:ci": "npm run test:prepare-webview && node --experimental-vm-modules node_modules/.bin/jest --config=jest.config.cjs --testPathPatterns='./test/.*\\.(spec|test)\\.(ts|js)$'",
     "dev:webview": "npm --prefix webview run dev",
     "build:webview": "npm --prefix webview run build",
     "check:webview": "npm --prefix webview run check"
