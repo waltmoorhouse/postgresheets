@@ -7,6 +7,7 @@
   const dispatch = createEventDispatcher();
   let dragIndex: number | null = null;
   let dragOverIndex: number | null = null;
+  let saveButtonRef: HTMLButtonElement | null = null;
 
   // Use a local copy of items for UI interactions; emit changes to parent
   let localItems = items.map(i => ({ ...i }));
@@ -63,6 +64,13 @@
     dispatch('reset');
   }
 
+  function handleEscape(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      dispatch('cancel');
+    }
+  }
+
   function onDragStart(event: DragEvent, idx: number) {
     dragIndex = idx;
     try {
@@ -114,9 +122,16 @@
   }
 
   let announcement = '';
+
+  // Focus the Save button on mount so keyboard users have a clear action
+  onMount(() => {
+    if (saveButtonRef) {
+      saveButtonRef.focus();
+    }
+  });
 </script>
 
-<div class="column-manager">
+<div class="column-manager" on:keydown={handleEscape} role="presentation">
   <ul class="column-manager-list" role="list">
     {#each localItems as item, idx}
       <li
@@ -154,9 +169,24 @@
 
   <!-- Live region for screen reader announcements when reordering -->
   <div aria-live="polite" class="sr-only">{announcement}</div>
-  <div class="modal-actions">
-    <button type="button" class="ps-btn ps-btn--primary" on:click={save}>Save</button>
-    <button type="button" class="ps-btn ps-btn--ghost" on:click={() => dispatch('cancel')}>Cancel</button>
+  <div class="modal-actions" role="group">
+    <button
+      type="button"
+      class="ps-btn ps-btn--primary"
+      bind:this={saveButtonRef}
+      on:click={save}
+      title="Save column preferences (Enter or Alt+S)"
+    >
+      Save
+    </button>
+    <button
+      type="button"
+      class="ps-btn ps-btn--ghost"
+      on:click={() => dispatch('cancel')}
+      title="Close without saving (Escape)"
+    >
+      Cancel
+    </button>
     <button type="button" class="ps-btn ps-btn--link" on:click={reset}>Reset to defaults</button>
   </div>
 </div>

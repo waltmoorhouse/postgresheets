@@ -7,6 +7,10 @@
 
   import FocusTrap from '$lib/components/FocusTrap.svelte';
 
+  function handleFocusTrapEscape(): void {
+    close();
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     // Only handle keydown if it originated from within the dialog
     if (!dialogElement || !dialogElement.contains(e.target as Node)) {
@@ -24,24 +28,10 @@
       showHelp = !showHelp;
       e.preventDefault();
     }
-    // Escape to close
-    if (e.key === 'Escape') {
-      close();
-      e.preventDefault();
-    }
   }
 
   function show(name: string) {
     dispatch('show', { name });
-    // move focus back into modal
-    setTimeout(() => focusFirst(), 0);
-  }
-
-  // Safe no-op focus helper so tests can call show() without requiring
-  // the focus trap to expose an implementation. Production will wire
-  // a real focus-first helper via the focus trap if available.
-  function focusFirst() {
-    // intentionally no-op in tests; focus management handled by focus trap in app
   }
 
   function showAll() {
@@ -66,15 +56,32 @@
 </script>
 
 <div class="modal-backdrop">
-  <FocusTrap ariaLabel="Hidden columns focus trap">
+  <FocusTrap ariaLabel="Hidden columns" on:escapepressed={handleFocusTrapEscape}>
   <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-  <div class="modal dialog hidden-columns" role="dialog" aria-modal="true" aria-label="Hidden columns" bind:this={dialogElement} on:keydown|capture={handleKeydown}>
+  <div
+    class="modal dialog hidden-columns"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="hidden-columns-heading"
+    aria-describedby="hidden-columns-description"
+    bind:this={dialogElement}
+    on:keydown|capture={handleKeydown}
+  >
     <div class="modal-header">
-      <h3>Hidden columns</h3>
-  <button type="button" class="help-btn ps-btn ps-btn--icon" aria-expanded={showHelp} aria-controls="shortcuts" aria-label="Keyboard shortcuts" on:click={toggleHelp} title="Keyboard shortcuts (Alt+H)">?
+      <h3 id="hidden-columns-heading">Hidden columns</h3>
+  <button
+        type="button"
+        class="help-btn ps-btn ps-btn--icon"
+        aria-expanded={showHelp}
+        aria-controls="shortcuts"
+        aria-label="Keyboard shortcuts"
+        on:click={toggleHelp}
+        title="Keyboard shortcuts (Alt+H)"
+      >
+        ?
       </button>
     </div>
-    <p>These columns are currently hidden. You can restore them individually or show all.</p>
+    <p id="hidden-columns-description">These columns are currently hidden. You can restore them individually or show all.</p>
   <section id="shortcuts" class="shortcut-help" hidden={!showHelp} aria-hidden={!showHelp} aria-labelledby="shortcuts-heading">
     <h4 id="shortcuts-heading" bind:this={shortcutsHeading} tabindex="-1">Keyboard shortcuts</h4>
       <ul>

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import ColumnManager from './ColumnManager.svelte';
   import HiddenColumnsModal from './HiddenColumnsModal.svelte';
+  import FocusTrap from '$lib/components/FocusTrap.svelte';
   import { clsx } from 'clsx';
   import type {
     VSCodeApi,
@@ -133,12 +134,14 @@
   let jsonEditorColumn: ColumnInfo | null = null;
   let jsonDraft = '';
   let jsonError = '';
+  let jsonTextarea: HTMLTextAreaElement | null = null;
 
   // Text modal state
   let textEditorOpen = false;
   let textEditorRow: RowState | null = null;
   let textEditorColumn: ColumnInfo | null = null;
   let textDraft = '';
+  let textTextarea: HTMLTextAreaElement | null = null;
 
   function deepClone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
@@ -600,6 +603,13 @@
     jsonEditorColumn = column;
     jsonDraft = formatCellValue(jsonEditorRow.current[column.name], column);
     jsonError = '';
+    // Focus the textarea on the next tick (after DOM update)
+    setTimeout(() => {
+      if (jsonTextarea) {
+        jsonTextarea.focus();
+        jsonTextarea.select();
+      }
+    }, 0);
   }
 
   function closeJsonEditor(): void {
@@ -608,6 +618,7 @@
     jsonEditorColumn = null;
     jsonDraft = '';
     jsonError = '';
+    jsonTextarea = null;
   }
 
   function openTextEditor(row: RowState, column: ColumnInfo): void {
@@ -615,6 +626,13 @@
     textEditorRow = rows.find((current) => current.id === row.id) ?? row;
     textEditorColumn = column;
     textDraft = formatCellValue(textEditorRow.current[column.name], column);
+    // Focus the textarea on the next tick (after DOM update)
+    setTimeout(() => {
+      if (textTextarea) {
+        textTextarea.focus();
+        textTextarea.select();
+      }
+    }, 0);
   }
 
   function closeTextEditor(): void {
@@ -622,6 +640,7 @@
     textEditorRow = null;
     textEditorColumn = null;
     textDraft = '';
+    textTextarea = null;
   }
 
   function saveTextDraft(): void {
@@ -1280,15 +1299,18 @@
 
     {#if columnManagerOpen}
       <div class="modal-backdrop">
-        <div class="modal dialog column-manager">
-          <ColumnManager
-            items={columns.map((c) => ({ name: c.name, type: c.type, visible: !hiddenColumnsSet.has(c.name) }))}
-            on:change={handleColumnManagerChange}
-            on:save={handleColumnManagerSave}
-            on:reset={() => resetPreferences()}
-            on:cancel={() => columnManagerOpen = false}
-          />
-        </div>
+        <FocusTrap ariaLabel="Column Manager" on:escapepressed={() => columnManagerOpen = false}>
+          <div class="modal dialog column-manager" role="dialog" aria-modal="true" aria-labelledby="column-manager-heading">
+            <h2 id="column-manager-heading" class="sr-only">Manage Columns</h2>
+            <ColumnManager
+              items={columns.map((c) => ({ name: c.name, type: c.type, visible: !hiddenColumnsSet.has(c.name) }))}
+              on:change={handleColumnManagerChange}
+              on:save={handleColumnManagerSave}
+              on:reset={() => resetPreferences()}
+              on:cancel={() => columnManagerOpen = false}
+            />
+          </div>
+        </FocusTrap>
       </div>
     {/if}
 
@@ -1527,80 +1549,150 @@
   </div>
 
   {#if sqlPreviewOpen}
-    <div class="modal">
-      <div class="modal-content preview-modal">
-        <header>
-          <h3>SQL Preview</h3>
-        </header>
-        {#if previewLoading}
-          <p class="preview-status">Generating SQL preview…</p>
-        {:else if sqlPreviewIsError}
-          <div class="sql-error-banner" role="alert" aria-live="polite">
-            <strong>Error generating SQL</strong>
-            <p class="sql-error-msg">{sqlPreview}</p>
+    <div class="modal-backdrop">
+      <FocusTrap ariaLabel="SQL Preview" on:escapepressed={closeSqlPreview}>
+        <div
+          class="modal dialog preview-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sql-preview-heading"
+          aria-describedby="sql-preview-content"
+        >
+          <header class="modal-header">
+            <h3 id="sql-preview-heading">SQL Preview</h3>
+          </header>
+          <div id="sql-preview-content" class="modal-body">
+            {#if previewLoading}
+              <p class="preview-status">Generating SQL preview…</p>
+            {:else if sqlPreviewIsError}
+              <div class="sql-error-banner" role="alert" aria-live="polite">
+                <strong>Error generating SQL</strong>
+                <p class="sql-error-msg">{sqlPreview}</p>
+              </div>
+              <pre class="sql-preview">{sqlPreview}</pre>
+            {:else if sqlPreview}
+              <pre class="sql-preview">{sqlPreview}</pre>
+            {:else}
+              <p class="preview-status">No SQL changes to display.</p>
+            {/if}
           </div>
-          <pre class="sql-preview">{sqlPreview}</pre>
-        {:else if sqlPreview}
-          <pre>{sqlPreview}</pre>
-        {:else}
-          <p class="preview-status">No SQL changes to display.</p>
-        {/if}
-        <footer>
-          <button type="button" class="ps-btn" on:click={closeSqlPreview}>Cancel</button>
-          <button
-            type="button"
-            class="ps-btn ps-btn--accent"
-            on:click={executeFromPreview}
-            disabled={executing || previewLoading || (hasValidationErrors && !bypassValidation)}
-            title={hasValidationErrors && !bypassValidation ? 'Fix validation errors before executing' : undefined}
-          >
-            Execute
-          </button>
-        </footer>
-      </div>
+          <footer class="modal-actions" role="group">
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={closeSqlPreview}
+              title="Close preview (Escape)"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--accent"
+              on:click={executeFromPreview}
+              disabled={executing || previewLoading || (hasValidationErrors && !bypassValidation)}
+              title={hasValidationErrors && !bypassValidation ? 'Fix validation errors before executing' : 'Execute changes (Enter)'}
+            >
+              Execute
+            </button>
+          </footer>
+        </div>
+      </FocusTrap>
     </div>
   {/if}
 
   {#if jsonEditorOpen && jsonEditorRow && jsonEditorColumn}
-    <div class="modal">
-      <div class="modal-content">
-        <header>
-          <h3>Edit {jsonEditorColumn.name} ({editorLabel(jsonEditorColumn)})</h3>
-          {#if jsonEditorColumn.enumValues && jsonEditorColumn.enumValues.length > 0}
-            <small class="enum-hint">Allowed: {jsonEditorColumn.enumValues.join(', ')}</small>
-          {/if}
-        </header>
-        <textarea
-          bind:value={jsonDraft}
-          spellcheck={false}
-          class={jsonError ? 'invalid' : ''}
-        ></textarea>
-        {#if jsonError}
-          <p class="error">{jsonError}</p>
-        {/if}
-        <footer>
-          <button type="button" class="ps-btn" on:click={closeJsonEditor}>Cancel</button>
-          <button type="button" class="ps-btn ps-btn--accent" on:click={saveJsonDraft}>Save</button>
-        </footer>
-      </div>
+    <div class="modal-backdrop">
+      <FocusTrap ariaLabel="JSON Editor" on:escapepressed={closeJsonEditor}>
+        <div
+          class="modal dialog json-editor-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="json-editor-heading"
+          aria-describedby="json-editor-description"
+        >
+          <header class="modal-header">
+            <h3 id="json-editor-heading">Edit {jsonEditorColumn.name} ({editorLabel(jsonEditorColumn)})</h3>
+            {#if jsonEditorColumn.enumValues && jsonEditorColumn.enumValues.length > 0}
+              <p id="json-editor-description" class="enum-hint">Allowed values: {jsonEditorColumn.enumValues.join(', ')}</p>
+            {/if}
+          </header>
+          <div class="modal-body">
+            <textarea
+              bind:this={jsonTextarea}
+              bind:value={jsonDraft}
+              spellcheck={false}
+              class={jsonError ? 'invalid' : ''}
+              aria-label="JSON content editor"
+              aria-describedby={jsonError ? 'json-error-message' : undefined}
+              aria-invalid={jsonError ? 'true' : 'false'}
+            ></textarea>
+            {#if jsonError}
+              <p id="json-error-message" class="error" role="alert">{jsonError}</p>
+            {/if}
+          </div>
+          <footer class="modal-actions" role="group">
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={closeJsonEditor}
+              title="Close without saving (Escape)"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--accent"
+              on:click={saveJsonDraft}
+              title="Save changes (Enter or primary action)"
+            >
+              Save
+            </button>
+          </footer>
+        </div>
+      </FocusTrap>
     </div>
   {/if}
 
   {#if textEditorOpen && textEditorRow && textEditorColumn}
-    <div class="modal">
-      <div class="modal-content">
-        <header>
-          <h3>Edit {textEditorColumn.name} (Text)</h3>
-        </header>
-        <textarea
-          bind:value={textDraft}
-          spellcheck={false}
-        ></textarea>
-        <footer>
-          <button type="button" class="ps-btn" on:click={closeTextEditor}>Cancel</button>
-          <button type="button" class="ps-btn ps-btn--accent" on:click={saveTextDraft}>Save</button>
-        </footer>
-      </div>
+    <div class="modal-backdrop">
+      <FocusTrap ariaLabel="Text Editor" on:escapepressed={closeTextEditor}>
+        <div
+          class="modal dialog text-editor-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="text-editor-heading"
+        >
+          <header class="modal-header">
+            <h3 id="text-editor-heading">Edit {textEditorColumn.name} (Text)</h3>
+          </header>
+          <div class="modal-body">
+            <textarea
+              bind:this={textTextarea}
+              bind:value={textDraft}
+              spellcheck={false}
+              aria-label="Text content editor"
+            ></textarea>
+          </div>
+          <footer class="modal-actions" role="group">
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={closeTextEditor}
+              title="Close without saving (Escape)"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--accent"
+              on:click={saveTextDraft}
+              title="Save changes (Enter or primary action)"
+            >
+              Save
+            </button>
+          </footer>
+        </div>
+      </FocusTrap>
     </div>
   {/if}
 {/if}
