@@ -1191,6 +1191,16 @@
     previewLoading = false;
   }
 
+  function copyToSqlTerminal(): void {
+    // Send message to extension to open SQL terminal and paste the SQL
+    ensureVscode().postMessage({
+      command: 'copyToSqlTerminal',
+      sql: sqlPreview
+    });
+    // Close the preview modal
+    closeSqlPreview();
+  }
+
   function executeFromPreview(): void {
     closeSqlPreview();
     requestExecution();
@@ -1869,6 +1879,15 @@
               title="Close preview (Escape)"
             >
               Cancel
+            </button>
+            <button
+              type="button"
+              class="ps-btn ps-btn--ghost"
+              on:click={copyToSqlTerminal}
+              disabled={executing || previewLoading || !sqlPreview}
+              title="Copy SQL to terminal without executing"
+            >
+              📋 Copy to Terminal
             </button>
             <button
               type="button"

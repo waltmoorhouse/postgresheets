@@ -94,18 +94,8 @@
 
 	function handleValidationResults(message: any) {
 		validationErrors = message.errors;
-		if (validationErrors.length === 0) {
-			step = 'validating';
-			// Proceed to import
-			vscode.postMessage({
-				command: 'executeImport',
-				mapping: columnMapping,
-				firstRowIsHeaders,
-				previewRows
-			});
-		} else {
-			step = 'preview';
-		}
+		// Stay on preview step either way - user can see results and decide
+		step = 'preview';
 	}
 
 	function toggleFirstRowHeaders() {
@@ -509,8 +499,7 @@
 		padding: 0.5rem;
 	}
 
-	.col-csv small,
-	.col-table small {
+	.col-csv small {
 		display: block;
 		color: var(--vscode-textCodeBlock-background);
 		font-size: 0.85em;
@@ -661,11 +650,6 @@
 		100% {
 			transform: rotate(360deg);
 		}
-	}
-
-	.col-csv small,
-	.col-table small {
-		color: var(--vscode-editorCodeLens-foreground);
 	}
 
 	.col-arrow {

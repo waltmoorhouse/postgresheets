@@ -119,7 +119,8 @@ export type WebviewToExtensionMessage =
     | { command: 'saveTablePreferences'; prefs: TablePreferences }
     | { command: 'resetTablePreferences' }
     | { command: 'openIndexManager' }
-    | { command: 'loadForeignKeyRows'; schemaName: string; tableName: string; columnName: string };
+    | { command: 'loadForeignKeyRows'; schemaName: string; tableName: string; columnName: string }
+    | { command: 'copyToSqlTerminal'; sql: string };
 
 // ============================================================================
 // EXTENSION → WEBVIEW MESSAGE TYPES (Discriminated Union)
@@ -155,7 +156,8 @@ export function isWebviewToExtension(msg: any): msg is WebviewToExtensionMessage
         msg.command === 'saveTablePreferences' ||
         msg.command === 'resetTablePreferences' ||
         msg.command === 'openIndexManager' ||
-        msg.command === 'loadForeignKeyRows'
+        msg.command === 'loadForeignKeyRows' ||
+        msg.command === 'copyToSqlTerminal'
     );
 }
 

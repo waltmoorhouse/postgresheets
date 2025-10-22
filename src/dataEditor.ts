@@ -589,6 +589,16 @@ export class DataEditor {
                     await this.loadForeignKeyRows(panel, connectionId, schemaName, tableName, message.columnName);
                     break;
                 }
+                case 'copyToSqlTerminal': {
+                    // Copy SQL to terminal without executing
+                    const sql = typeof message.sql === 'string' ? message.sql : '';
+                    if (sql) {
+                        const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('SQL Terminal');
+                        terminal.sendText(sql, false);
+                        terminal.show(true);
+                    }
+                    break;
+                }
             }
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
