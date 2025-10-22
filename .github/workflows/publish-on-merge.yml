@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install svelte-preprocess (needed for webview build)
+        run: npm install -D svelte-preprocess
+
       - uses: actions-ecosystem/action-release-label@v1
         id: version-label
         with:
