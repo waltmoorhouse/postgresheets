@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from './connectionManager';
 import { DatabaseTreeItem } from './databaseTreeProvider';
 import { SqlGenerator } from './sqlGenerator';
+import { IndexManagerView } from './indexManagerView';
 import { parsePostgresArrayLiteral, applyEnumLabelsToColumns } from './pgUtils';
 import type {
     ColumnInfo,
@@ -288,6 +289,64 @@ export class DataEditor {
                 columns: pkResult.rows.map(row => row.attname)
             };
 
+            // Fetch unique constraints
+            const uniqueResult = await client.query(
+                `SELECT a.attname
+                 FROM pg_constraint c
+                 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+                 JOIN pg_class t ON t.oid = c.conrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 WHERE t.relname = $1 AND n.nspname = $2 AND c.contype = 'u'`,
+                [tableName, schemaName || 'public']
+            );
+            const uniqueColumns = new Set(uniqueResult.rows.map(row => row.attname));
+
+            // Fetch indexed columns
+            const indexResult = await client.query(
+                `SELECT DISTINCT a.attname
+                 FROM pg_index i
+                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                 JOIN pg_class t ON t.oid = i.indrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 WHERE t.relname = $1 AND n.nspname = $2 AND NOT i.indisprimary`,
+                [tableName, schemaName || 'public']
+            );
+            const indexedColumns = new Set(indexResult.rows.map(row => row.attname));
+
+            // Fetch foreign key information
+            const fkResult = await client.query(
+                `SELECT 
+                    a.attname as column_name,
+                    t2.relname as referenced_table,
+                    n2.nspname as referenced_schema,
+                    a2.attname as referenced_column
+                 FROM pg_constraint c
+                 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+                 JOIN pg_class t ON t.oid = c.conrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 JOIN pg_class t2 ON t2.oid = c.confrelid
+                 JOIN pg_namespace n2 ON n2.oid = t2.relnamespace
+                 JOIN pg_attribute a2 ON a2.attrelid = c.confrelid AND a2.attnum = ANY(c.confkey)
+                 WHERE t.relname = $1 AND n.nspname = $2 AND c.contype = 'f'`,
+                [tableName, schemaName || 'public']
+            );
+            const foreignKeys: Record<string, { referencedSchema: string; referencedTable: string; referencedColumn: string }> = {};
+            for (const row of fkResult.rows) {
+                foreignKeys[row.column_name] = {
+                    referencedSchema: row.referenced_schema,
+                    referencedTable: row.referenced_table,
+                    referencedColumn: row.referenced_column
+                };
+            }
+
+            // Enrich columns with constraint and index information
+            columns = columns.map(col => ({
+                ...col,
+                isUnique: uniqueColumns.has(col.name),
+                isIndexed: indexedColumns.has(col.name),
+                foreignKey: foreignKeys[col.name]
+            }));
+
             const offset = state.page * this.paginationSize;
             const qualifiedTable = `${this.quoteIdentifier(schemaName)}.${this.quoteIdentifier(tableName)}`;
 
@@ -494,6 +553,23 @@ export class DataEditor {
                 }
                 case 'resetTablePreferences': {
                     await this.resetTablePreferences(panel, schemaName, tableName);
+                    break;
+                }
+                case 'openIndexManager': {
+                    // Open the index manager for this table
+                    const indexManagerView = new IndexManagerView(this.context, this.connectionManager);
+                    const mockItem: Partial<DatabaseTreeItem> = {
+                        connectionId,
+                        schemaName,
+                        tableName,
+                        type: 'table'
+                    };
+                    await indexManagerView.openIndexManager(mockItem as DatabaseTreeItem);
+                    break;
+                }
+                case 'loadForeignKeyRows': {
+                    // Load rows from the foreign key referenced table
+                    await this.loadForeignKeyRows(panel, connectionId, schemaName, tableName, message.columnName);
                     break;
                 }
             }
@@ -729,6 +805,95 @@ export class DataEditor {
             panel.webview.postMessage({ command: 'resetTablePreferencesResult', payload: { success: true } });
         } catch (err) {
             panel.webview.postMessage({ command: 'resetTablePreferencesResult', payload: { success: false, error: String(err) } });
+        }
+    }
+
+    private async loadForeignKeyRows(
+        panel: vscode.WebviewPanel,
+        connectionId: string,
+        schemaName: string,
+        tableName: string,
+        columnName: string
+    ): Promise<void> {
+        try {
+            const client = await this.connectionManager.getClient(connectionId);
+            if (!client) {
+                panel.webview.postMessage({
+                    command: 'webviewError',
+                    error: { message: 'No active connection available' }
+                });
+                return;
+            }
+
+            this.connectionManager.markBusy(connectionId);
+
+            // First, get the column info to find the FK reference
+            const cacheKey = `${connectionId}:${schemaName}.${tableName}`;
+            const cached = this.schemaCache.get(cacheKey);
+            let column: ColumnInfo | undefined;
+
+            if (cached) {
+                column = cached.columns.find(c => c.name === columnName);
+            } else {
+                // If not cached, we need to look it up
+                // For now, just return an error
+                panel.webview.postMessage({
+                    command: 'webviewError',
+                    error: { message: 'Column information not available' }
+                });
+                return;
+            }
+
+            if (!column || !column.foreignKey) {
+                panel.webview.postMessage({
+                    command: 'webviewError',
+                    error: { message: 'Column is not a foreign key' }
+                });
+                return;
+            }
+
+            const { referencedSchema, referencedTable, referencedColumn } = column.foreignKey;
+
+            // Query the referenced table to get rows (limit to 1000 for performance)
+            const quotedSchema = `"${referencedSchema}"`;
+            const quotedTable = `"${referencedTable}"`;
+            const query = `SELECT * FROM ${quotedSchema}.${quotedTable} LIMIT 1000`;
+
+            const result = await client.query(query);
+            const rows = result.rows || [];
+
+            // Find the primary key of the referenced table to return it
+            const pkResult = await client.query(
+                `SELECT a.attname
+                 FROM pg_index i
+                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                 JOIN pg_class t ON t.oid = i.indrelid
+                 JOIN pg_class idx ON idx.oid = i.indexrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                 WHERE n.nspname = $1 AND t.relname = $2 AND i.indisprimary
+                 ORDER BY a.attnum`,
+                [referencedSchema, referencedTable]
+            );
+
+            let pkColumn = referencedColumn;
+            if (pkResult.rows && pkResult.rows.length > 0) {
+                pkColumn = (pkResult.rows[0] as any).attname;
+            }
+
+            panel.webview.postMessage({
+                command: 'foreignKeyRows',
+                rows,
+                pkColumn
+            });
+
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            panel.webview.postMessage({
+                command: 'webviewError',
+                error: { message: `Failed to load foreign key rows: ${errorMsg}` }
+            });
+        } finally {
+            this.connectionManager.markIdle(connectionId);
         }
     }
 

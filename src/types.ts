@@ -13,6 +13,13 @@ export interface ColumnInfo {
     type: string;
     nullable: boolean;
     enumValues?: string[];
+    isUnique?: boolean;
+    isIndexed?: boolean;
+    foreignKey?: {
+        referencedSchema: string;
+        referencedTable: string;
+        referencedColumn: string;
+    };
 }
 
 /**
@@ -110,7 +117,9 @@ export type WebviewToExtensionMessage =
     | { command: 'applyFilters'; filters: FilterMap }
     | { command: 'refresh' }
     | { command: 'saveTablePreferences'; prefs: TablePreferences }
-    | { command: 'resetTablePreferences' };
+    | { command: 'resetTablePreferences' }
+    | { command: 'openIndexManager' }
+    | { command: 'loadForeignKeyRows'; schemaName: string; tableName: string; columnName: string };
 
 // ============================================================================
 // EXTENSION → WEBVIEW MESSAGE TYPES (Discriminated Union)
@@ -123,7 +132,8 @@ export type ExtensionToWebviewMessage =
     | { command: 'executionComplete'; success: boolean; error?: string }
     | { command: 'showMessage'; text: string }
     | { command: 'showError'; error: ErrorInfo }
-    | { command: 'webviewError'; error: ErrorInfo };
+    | { command: 'webviewError'; error: ErrorInfo }
+    | { command: 'foreignKeyRows'; rows: RowData[]; pkColumn: string };
 
 /**
  * Union type for all possible webview messages
@@ -143,7 +153,9 @@ export function isWebviewToExtension(msg: any): msg is WebviewToExtensionMessage
         msg.command === 'applyFilters' ||
         msg.command === 'refresh' ||
         msg.command === 'saveTablePreferences' ||
-        msg.command === 'resetTablePreferences'
+        msg.command === 'resetTablePreferences' ||
+        msg.command === 'openIndexManager' ||
+        msg.command === 'loadForeignKeyRows'
     );
 }
 
@@ -158,7 +170,8 @@ export function isExtensionToWebview(msg: any): msg is ExtensionToWebviewMessage
         msg.command === 'executionComplete' ||
         msg.command === 'showMessage' ||
         msg.command === 'showError' ||
-        msg.command === 'webviewError'
+        msg.command === 'webviewError' ||
+        msg.command === 'foreignKeyRows'
     );
 }
 

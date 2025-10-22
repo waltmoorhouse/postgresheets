@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import ColumnManager from './ColumnManager.svelte';
   import HiddenColumnsModal from './HiddenColumnsModal.svelte';
+  import FKSelectorModal from './FKSelectorModal.svelte';
   import FocusTrap from '$lib/components/FocusTrap.svelte';
   import { clsx } from 'clsx';
   import type {
@@ -141,6 +142,12 @@
   let textEditorColumn: ColumnInfo | null = null;
   let textDraft = '';
   let textTextarea: HTMLTextAreaElement | null = null;
+
+  // Foreign key selector modal state
+  let fkSelectorOpen = false;
+  let fkSelectorRow: RowState | null = null;
+  let fkSelectorColumn: ColumnInfo | null = null;
+  let currentConnectionId = '';
 
   function deepClone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
@@ -774,6 +781,43 @@
     }
   }
 
+  function openFKSelector(row: RowState, column: ColumnInfo): void {
+    if (!column.foreignKey) {
+      return;
+    }
+    fkSelectorOpen = true;
+    fkSelectorRow = rows.find((current) => current.id === row.id) ?? row;
+    fkSelectorColumn = column;
+  }
+
+  function closeFKSelector(): void {
+    fkSelectorOpen = false;
+    fkSelectorRow = null;
+    fkSelectorColumn = null;
+  }
+
+  function handleFKSelected(event: CustomEvent<{ value: unknown }>): void {
+    if (!fkSelectorRow || !fkSelectorColumn) {
+      return;
+    }
+    const { name } = fkSelectorColumn;
+    const { value } = event.detail;
+    const updatedRows = rows.map((row) => {
+      if (row.id !== fkSelectorRow?.id) {
+        return row;
+      }
+      return {
+        ...row,
+        current: {
+          ...row.current,
+          [name]: value
+        }
+      };
+    });
+    rows = updatedRows;
+    closeFKSelector();
+  }
+
   function toggleSort(column: ColumnInfo): void {
     let next: SortDescriptor | null = null;
     if (!activeSort || activeSort.column !== column.name) {
@@ -1377,6 +1421,18 @@
       />
     {/if}
 
+    {#if fkSelectorOpen && fkSelectorColumn}
+      <FKSelectorModal
+        column={fkSelectorColumn}
+        schemaName={schemaName}
+        tableName={tableName}
+        isOpen={fkSelectorOpen}
+        {vscode}
+        on:fkSelected={handleFKSelected}
+        on:close={closeFKSelector}
+      />
+    {/if}
+
     <section class="toolbar">
       <div class="toolbar-group toolbar-search">
         <input
@@ -1439,6 +1495,23 @@
                     <span>{column.name}</span>
                     {#if primaryKey.includes(column.name)}
                       <span class="pk" title="Primary key">🔑</span>
+                    {/if}
+                    {#if column.foreignKey}
+                      <span class="fk" title={`Foreign key: ${column.foreignKey.referencedSchema}.${column.foreignKey.referencedTable}.${column.foreignKey.referencedColumn}`}>🔗</span>
+                    {/if}
+                    {#if column.isUnique}
+                      <span class="unique" title="Unique constraint">✓</span>
+                    {/if}
+                    {#if column.isIndexed}
+                      <button 
+                        type="button" 
+                        class="index-indicator" 
+                        title="Click to manage indexes for this table"
+                        on:click={(event) => {
+                          event.stopPropagation();
+                          ensureVscode().postMessage({ command: 'openIndexManager' });
+                        }}
+                      >📑</button>
                     {/if}
                     {#if sortIndicator(column)}
                       <span class="sort-indicator">{sortIndicator(column)}</span>
@@ -1542,6 +1615,32 @@
                       {/if}
                     </button>
                     <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
+                  </td>
+                {:else if column.foreignKey}
+                    {@const err = row.validation?.[column.name]}
+                  <td class={clsx('cell', { modified: isColumnModified(row, column) })} style={columnStyle(column)}>
+                    <div class="cell-edit">
+                      <input
+                        type="text"
+                        value={formatCellValue(row.current[column.name], column)}
+                        disabled={row.deleted}
+                        on:input={(event) => handleTextInput(row, column, event)}
+                        class="cell-input"
+                        aria-invalid={err ? 'true' : 'false'}
+                        aria-describedby={err ? errorId(row.id, column.name) : undefined}
+                        placeholder="Enter FK value or click..."
+                      >
+                      <button
+                        type="button"
+                        class="ps-btn ps-btn--icon text-expand-button"
+                        disabled={row.deleted}
+                        on:click={() => openFKSelector(row, column)}
+                        title="Browse and select from referenced table"
+                      >
+                        🔗
+                      </button>
+                      <span id={errorId(row.id, column.name)} class="cell-error" role="img" aria-hidden={!err} title={err}>{err ? '⚠' : ''}</span>
+                    </div>
                   </td>
                 {:else}
                     {@const err = row.validation?.[column.name]}
