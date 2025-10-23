@@ -1,11 +1,11 @@
 # PostgreSQL Data Editor for VSCode
 
-[![Publish](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml/badge.svg?branch=oct20)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml)
-[![Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/WaltMoorhouse.postgresheets?label=marketplace%20version)](https://marketplace.visualstudio.com/items?itemName=WaltMoorhouse.postgresheets)
 [![Build](https://github.com/waltmoorhouse/postgresheets/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/build.yml)
 [![Tests](https://github.com/waltmoorhouse/postgresheets/actions/workflows/component-tests.yml/badge.svg?branch=main)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/component-tests.yml)
 [![Version](https://img.shields.io/badge/version-2.0.6-blue.svg)](https://github.com/waltmoorhouse/postgresheets/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.md)
+[![Publish](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml/badge.svg?branch=next-level)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml)
+[![Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/WaltMoorhouse.postgresheets?label=marketplace%20version)](https://marketplace.visualstudio.com/items?itemName=WaltMoorhouse.postgresheets)
 
 A VSCode extension that lets you connect to PostgreSQL databases and edit table data in a spreadsheet-like interface.
 
@@ -20,8 +20,10 @@ A VSCode extension that lets you connect to PostgreSQL databases and edit table 
 - 👁️ **SQL Preview** - Preview generated SQL before execution
 - 📄 **Pagination** - Handle large tables with 100-row pagination
 - 💾 **CSV Export** - Export table data to CSV format with optional headers
-- � **CSV Import** - Import data from CSV files with automatic column mapping and type conversion
-- �📋 **Query History** - Automatic query tracking with search and clipboard integration
+- 📥 **CSV Import** - Import data from CSV files with automatic column mapping and type conversion
+- 📋 **Query History** - Automatic query tracking with search and clipboard integration
+- 📊 **Table Statistics** - View table size, row counts, index usage, bloat analysis, and maintenance info
+- 💾 **Database Backup/Restore** - Full backup and restore using pg_dump/pg_restore with multiple format options (requires pg_dump/pg_restore be installed on system and in path)
 - ♿ **Full Keyboard Navigation** - All features accessible via keyboard
 - 🔊 **Screen Reader Support** - WCAG 2.1 Level AA accessibility compliance
 
@@ -198,6 +200,123 @@ The extension automatically tracks executed queries for easy reference and reuse
 - Stores up to 100 most recent queries
 - Persists across VSCode sessions
 - Per-connection history tracking with timestamps
+
+### Table Statistics
+
+View comprehensive statistics and health metrics for any table:
+
+1. **Open Table Statistics:**
+   - Right-click on a table in the tree view
+   - Select "View Table Statistics"
+   - Or use Command Palette: `PostgreSQL: View Table Statistics`
+
+2. **Statistics Displayed:**
+   - **Table Overview:**
+     - Total row count
+     - Table size (bytes, KB, MB, GB)
+     - Number of indexes
+     - Dead tuples count
+     - Live tuple ratio (% of active vs deleted rows)
+   - **Maintenance Information:**
+     - Last VACUUM timestamp
+     - Last ANALYZE timestamp
+   - **Bloat Analysis:**
+     - Estimated bloat percentage
+     - Estimated bloat size
+     - Maintenance recommendations
+   - **Index Statistics:**
+     - Index name and size
+     - Scan counts (how often used)
+     - Tuples read and fetched
+     - Last used timestamp
+     - Unused index detection
+
+3. **Actions Available:**
+   - **Refresh** - Reload all statistics
+   - **Run VACUUM** - Reclaim storage space from dead tuples
+   - **Run ANALYZE** - Update query planner statistics
+
+4. **Health Indicators:**
+   - 🟢 Green: Good health (live ratio > 80%, bloat < 20%)
+   - 🟡 Yellow: Monitor recommended (bloat 20-30%)
+   - 🔴 Red: Action needed (bloat > 30%, unused indexes)
+
+### Database Backup and Restore
+
+Create and restore full database backups using PostgreSQL's native tools:
+
+#### Prerequisites
+- PostgreSQL client tools installed (`pg_dump` and `pg_restore`)
+- Sufficient disk space for backup files
+- Database access permissions
+
+#### Backup Database
+
+1. **Start Backup:**
+   - Right-click on a connected database in the tree view
+   - Select "Backup Database"
+   - Or use Command Palette: `PostgreSQL: Backup Database`
+
+2. **Select Format:**
+   - **Custom (recommended)** - Compressed binary format, best for restore flexibility
+   - **Plain SQL** - Human-readable SQL script
+   - **Directory** - Directory format supporting parallel operations
+   - **Tar** - Tar archive format
+
+3. **Choose Save Location:**
+   - File picker opens with suggested filename (includes timestamp)
+   - Select destination folder and confirm
+
+4. **Monitor Progress:**
+   - Progress notification shows backup status
+   - Completion message displays saved file path
+
+**Backup Features:**
+- Automatic timestamp in filename
+- Progress tracking during backup
+- Multiple format options for different use cases
+- Full transaction consistency
+- Compressed output (custom format)
+
+#### Restore Database
+
+⚠️ **Warning:** Restoring will modify your database. Always backup first!
+
+1. **Start Restore:**
+   - Right-click on a connected database in the tree view
+   - Select "Restore Database"
+   - Or use Command Palette: `PostgreSQL: Restore Database`
+
+2. **Confirmation:**
+   - Warning dialog appears
+   - Requires explicit "Continue" confirmation
+
+3. **Select Backup File:**
+   - File picker opens
+   - Supports .dump, .tar, and .sql files
+   - Automatically detects file format
+
+4. **Restore Options:**
+   - **Clean Mode:**
+     - **No** - Add to existing database (merge)
+     - **Yes** - Drop existing objects before restore (clean slate)
+
+5. **Monitor Progress:**
+   - Progress notification shows restore status
+   - Completion refreshes database tree view
+
+**Restore Features:**
+- Automatic format detection
+- Single transaction mode (all-or-nothing)
+- IF EXISTS safety (prevents errors on missing objects)
+- No owner restore (avoids permission issues)
+- Progress tracking during restore
+
+**Safety Tips:**
+- Always create a backup before restoring
+- Test restores on a development database first
+- Use clean mode carefully - it drops existing objects
+- Large databases may take several minutes
 
 ## Keyboard Shortcuts
 

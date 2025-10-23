@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "2.0.25",
+  "version": "3.0.10",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -144,6 +144,24 @@
         "title": "Refresh Query History",
         "icon": "$(refresh)",
         "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.viewTableStats",
+        "title": "View Table Statistics",
+        "icon": "$(graph)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.backupDatabase",
+        "title": "Backup Database",
+        "icon": "$(cloud-download)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.restoreDatabase",
+        "title": "Restore Database",
+        "icon": "$(cloud-upload)",
+        "category": "PostgreSQL"
       }
     ],
     "viewsContainers": {
@@ -260,6 +278,21 @@
           "command": "postgres-editor.managePermissions",
           "when": "view == postgresExplorer && viewItem == table",
           "group": "2_manage@2"
+        },
+        {
+          "command": "postgres-editor.viewTableStats",
+          "when": "view == postgresExplorer && viewItem == table",
+          "group": "2_manage@3"
+        },
+        {
+          "command": "postgres-editor.backupDatabase",
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy)",
+          "group": "3_terminal@2"
+        },
+        {
+          "command": "postgres-editor.restoreDatabase",
+          "when": "view == postgresExplorer && (viewItem == connection.connected || viewItem == connection.busy)",
+          "group": "3_terminal@3"
         },
         {
           "command": "postgres-editor.openSqlTerminal",

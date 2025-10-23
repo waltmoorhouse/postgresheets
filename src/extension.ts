@@ -12,6 +12,8 @@ import { QueryHistoryView } from './queryHistoryView';
 import { SqlTerminalProvider } from './sqlTerminalProvider';
 import { IndexManagerView } from './indexManagerView';
 import { PermissionsManagerView } from './permissionsManagerView';
+import { TableStatsViewProvider } from './tableStatsViewProvider';
+import { BackupRestoreManager } from './backupRestoreManager';
 import { info } from './logger';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -52,6 +54,8 @@ export function activate(context: vscode.ExtensionContext) {
     const sqlTerminalProvider = new SqlTerminalProvider(context, connectionManager, queryHistory);
     const indexManagerView = new IndexManagerView(context, connectionManager);
     const permissionsManagerView = new PermissionsManagerView(context, connectionManager);
+    const tableStatsViewProvider = new TableStatsViewProvider(context, connectionManager);
+    const backupRestoreManager = new BackupRestoreManager(connectionManager);
 
     // Register tree view
     const treeView = vscode.window.createTreeView('postgresExplorer', {
@@ -419,6 +423,167 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             await permissionsManagerView.openPermissionsManager(item);
+        }),
+
+        vscode.commands.registerCommand('postgres-editor.viewTableStats', async (item?: DatabaseTreeItem) => {
+            if (!item || item.type !== 'table') {
+                vscode.window.showErrorMessage('View Table Statistics must be invoked on a table node.');
+                return;
+            }
+
+            await tableStatsViewProvider.openStatsView(item);
+        }),
+
+        vscode.commands.registerCommand('postgres-editor.backupDatabase', async (item?: DatabaseTreeItem) => {
+            const target = await resolveConnectionTarget(item);
+            if (!target) return;
+
+            // Check if pg_dump is available
+            const available = await backupRestoreManager.checkPgDumpAvailable();
+            if (!available) {
+                const install = await vscode.window.showErrorMessage(
+                    'pg_dump is not available. Please install PostgreSQL client tools.',
+                    'Learn More'
+                );
+                if (install === 'Learn More') {
+                    vscode.env.openExternal(vscode.Uri.parse('https://www.postgresql.org/download/'));
+                }
+                return;
+            }
+
+            // Get connection config for database name
+            const connections = await connectionManager.getConnections();
+            const config = connections.find(c => c.id === target.id);
+            if (!config) {
+                vscode.window.showErrorMessage('Connection not found');
+                return;
+            }
+
+            // Select backup format
+            const formatChoice = await vscode.window.showQuickPick([
+                { label: 'Custom (recommended)', value: 'custom', description: 'PostgreSQL custom archive format (compressed)' },
+                { label: 'Plain SQL', value: 'plain', description: 'Plain-text SQL script' },
+                { label: 'Directory', value: 'directory', description: 'Directory format (parallel dump)' },
+                { label: 'Tar', value: 'tar', description: 'Tar archive format' }
+            ], { placeHolder: 'Select backup format' });
+
+            if (!formatChoice) return;
+
+            const format = formatChoice.value as 'custom' | 'plain' | 'directory' | 'tar';
+
+            // Get save location
+            const suggestedFilename = backupRestoreManager.getSuggestedBackupFilename(config.database, format);
+            const saveUri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(suggestedFilename),
+                filters: format === 'plain' ? { 'SQL Files': ['sql'] } : { 'Backup Files': ['dump', 'tar', 'dir'] }
+            });
+
+            if (!saveUri) return;
+
+            // Perform backup with progress
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `Backing up database "${config.database}"`,
+                cancellable: false
+            }, async (progress) => {
+                try {
+                    await backupRestoreManager.backupDatabase(
+                        target.id,
+                        saveUri.fsPath,
+                        { format, verbose: true },
+                        (backupProgress) => {
+                            progress.report({
+                                message: backupProgress.message,
+                                increment: backupProgress.percentage
+                            });
+                        }
+                    );
+
+                    vscode.window.showInformationMessage(`Database backup completed: ${saveUri.fsPath}`);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Backup failed: ${error}`);
+                }
+            });
+        }),
+
+        vscode.commands.registerCommand('postgres-editor.restoreDatabase', async (item?: DatabaseTreeItem) => {
+            const target = await resolveConnectionTarget(item);
+            if (!target) return;
+
+            // Check if pg_restore is available
+            const available = await backupRestoreManager.checkPgRestoreAvailable();
+            if (!available) {
+                const install = await vscode.window.showErrorMessage(
+                    'pg_restore is not available. Please install PostgreSQL client tools.',
+                    'Learn More'
+                );
+                if (install === 'Learn More') {
+                    vscode.env.openExternal(vscode.Uri.parse('https://www.postgresql.org/download/'));
+                }
+                return;
+            }
+
+            // Warning
+            const proceed = await vscode.window.showWarningMessage(
+                'Restoring a database will modify your data. Make sure you have a backup first.',
+                { modal: true },
+                'Continue'
+            );
+
+            if (proceed !== 'Continue') return;
+
+            // Get backup file
+            const openUri = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                filters: {
+                    'Backup Files': ['dump', 'tar', 'sql'],
+                    'All Files': ['*']
+                }
+            });
+
+            if (!openUri || openUri.length === 0) return;
+
+            const backupPath = openUri[0].fsPath;
+
+            // Restore options
+            const cleanChoice = await vscode.window.showQuickPick([
+                { label: 'No', value: false, description: 'Add to existing database' },
+                { label: 'Yes (Clean)', value: true, description: 'Drop existing objects before restore' }
+            ], { placeHolder: 'Clean database before restore?' });
+
+            if (cleanChoice === undefined) return;
+
+            // Perform restore with progress
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'Restoring database',
+                cancellable: false
+            }, async (progress) => {
+                try {
+                    await backupRestoreManager.restoreDatabase(
+                        target.id,
+                        backupPath,
+                        {
+                            clean: cleanChoice.value,
+                            ifExists: true,
+                            noOwner: true,
+                            singleTransaction: true,
+                            verbose: true
+                        },
+                        (restoreProgress) => {
+                            progress.report({
+                                message: restoreProgress.message,
+                                increment: restoreProgress.percentage
+                            });
+                        }
+                    );
+
+                    vscode.window.showInformationMessage('Database restore completed successfully');
+                    treeProvider.refresh();
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Restore failed: ${error}`);
+                }
+            });
         }),
 
         treeView

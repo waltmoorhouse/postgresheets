@@ -200,3 +200,49 @@ export interface ColumnTypeMetadata {
     typelem: number;
     oid: number;
 }
+
+/**
+ * Table statistics data
+ */
+export interface TableStatsData {
+    tableName: string;
+    schemaName: string;
+    rowCount: number;
+    sizeBytes: number;
+    indexes: number;
+    lastVacuum?: Date;
+    lastAnalyze?: Date;
+    deadTuples: number;
+    liveRatio: number;
+}
+
+/**
+ * Index statistics data
+ */
+export interface IndexStatsData {
+    indexName: string;
+    sizeBytes: number;
+    scans: number;
+    tuples: number;
+    reads: number;
+    lastUsed?: Date;
+    isUnused: boolean;
+}
+
+/**
+ * Bloat analysis data
+ */
+export interface BloatAnalysisData {
+    estimatedBloatRatio: number;
+    estimatedBloatBytes: number;
+    recommendation: string;
+}
+
+/**
+ * Backup/restore progress data
+ */
+export interface BackupRestoreProgress {
+    phase: 'connecting' | 'dumping' | 'complete' | 'error';
+    message: string;
+    percentage?: number;
+}
