@@ -44,16 +44,6 @@
    - Impact: Complex queries require SQL knowledge
    - Effort: Large (2-3 weeks)
 
-9. **Database Backup/Restore**
-   - Status: Not implemented
-   - Impact: Must use `pg_dump`/`pg_restore` manually
-   - Effort: Large (1-2 weeks)
-
-11. **Table Statistics View**
-    - Status: Not implemented
-    - Impact: No visibility into table size, index usage, etc.
-    - Effort: Small (2-3 days)
-
 12. **Stored Procedure Editor**
     - Status: Not implemented
     - Impact: Must use external editor for procedures/functions

@@ -166,16 +166,16 @@ describe('ConnectionManager cancelConnect', () => {
         const firstResult = await firstAttempt;
         expect(firstResult).toBeNull();
 
-        // Verify the connection is in the cancelled set
-        expect((mgr as any).cancelledConnections.has(config.id)).toBe(true);
+        // Status should be disconnected after cancel
+        expect(mgr.getConnectionStatus(config.id)).toBe('disconnected');
 
         // Now the user manually retries by calling connect() again
-        // This should clear the cancelled flag and allow a new attempt
+        // This should be allowed (no retry prevention logic)
         const secondAttempt = mgr.connect(config.id, false);
         await new Promise((r) => setTimeout(r, 20));
 
-        // The cancelled flag should be cleared now
-        expect((mgr as any).cancelledConnections.has(config.id)).toBe(false);
+        // Status should be connecting for the new attempt
+        expect(mgr.getConnectionStatus(config.id)).toBe('connecting');
 
         // Clean up - cancel the second attempt so the test can complete
         await mgr.cancelConnect(config.id);

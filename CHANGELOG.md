@@ -2,10 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] - Oct 22, 2025
+
+### Added
+- **Table Statistics View**: New comprehensive table statistics viewer displaying:
+  - Table overview: row count, table size, number of indexes, dead tuples, live tuple ratio
+  - Maintenance info: last VACUUM and ANALYZE timestamps
+  - Bloat analysis: estimated bloat percentage and size with maintenance recommendations
+  - Index statistics: size, scan counts, tuple reads, last used timestamp, and unused index detection
+  - Interactive actions: Refresh, Run VACUUM, and Run ANALYZE buttons
+  - Visual indicators for health (color-coded warnings for high bloat and low live ratios)
+  - Available via context menu on any table in the tree view
+- **Database Backup/Restore**: Full database backup and restore functionality using PostgreSQL tools:
+  - Backup database using `pg_dump` with multiple format options:
+    - Custom format (recommended, compressed)
+    - Plain SQL (human-readable)
+    - Directory format (parallel dump support)
+    - Tar archive format
+  - Restore database using `pg_restore` or `psql`
+  - Progress tracking during backup/restore operations
+  - Configurable options: clean restore, schema-only, data-only, single transaction
+  - Automatic format detection based on file extension
+  - Safe restore with confirmation dialogs
+  - Suggested filenames with timestamps
+  - Available via context menu on connected database connections
+
+### Changed
+- **KNOWN_ISSUES.md**: Removed backlog items #9 (Database Backup/Restore) and #11 (Table Statistics View) as they are now implemented
+
 ## [3.0.2] Oct 22, 2025
 
 ### Bug Fixes
-- **Connection Retry After Cancel**: Fixed issue where canceling a connection attempt would prevent manual retries. Users can now cancel a failed connection (e.g., when VPN is off) and successfully retry after fixing the issue. The cancelled flag is now cleared when the user explicitly clicks "Connect", allowing manual retries while still preventing automatic retry loops.
+- **Removed Buggy Connection Retry Logic**: Completely removed automatic retry mechanisms from connection management. Connections now follow a simple state machine:
+  - Click "Connect" → attempts connection → success = 'connected', failure = 'error'
+  - Click "Cancel" during connection → goes to 'disconnected'
+  - Click "Connect" again after cancel/error → attempts fresh connection (no blocking)
+  - Expanding tree nodes (databases/schemas/tables) when disconnected → attempts connection once
+  - `getClient()` now only returns existing connections without attempting to reconnect
+  - This fixes issues where cancelled connections would retry automatically or block manual retries
+
+## [3.0.1] Oct 22, 2025
+- Bugfix in Add New Connection screen
 
 ## [3.0.1] Oct 22, 2025
 

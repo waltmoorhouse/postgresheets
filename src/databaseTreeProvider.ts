@@ -136,8 +136,12 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     }
 
     private async getDatabases(connectionId: string): Promise<DatabaseTreeItem[]> {
-        const client = await this.connectionManager.getClient(connectionId);
-        if (!client) return [];
+        // Try to get existing client, if not connected, attempt to connect
+        let client = await this.connectionManager.getClient(connectionId);
+        if (!client) {
+            client = await this.connectionManager.connect(connectionId);
+            if (!client) return [];
+        }
 
         this.connectionManager.markBusy(connectionId);
 
@@ -166,8 +170,12 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     }
 
     private async getSchemas(connectionId: string, databaseName: string): Promise<DatabaseTreeItem[]> {
-        const client = await this.connectionManager.getClient(connectionId);
-        if (!client) return [];
+        // Try to get existing client, if not connected, attempt to connect
+        let client = await this.connectionManager.getClient(connectionId);
+        if (!client) {
+            client = await this.connectionManager.connect(connectionId);
+            if (!client) return [];
+        }
 
         this.connectionManager.markBusy(connectionId);
 
@@ -198,8 +206,12 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     }
 
     private async getTables(connectionId: string, databaseName: string, schemaName: string): Promise<DatabaseTreeItem[]> {
-        const client = await this.connectionManager.getClient(connectionId);
-        if (!client) return [];
+        // Try to get existing client, if not connected, attempt to connect
+        let client = await this.connectionManager.getClient(connectionId);
+        if (!client) {
+            client = await this.connectionManager.connect(connectionId);
+            if (!client) return [];
+        }
 
         this.connectionManager.markBusy(connectionId);
 
