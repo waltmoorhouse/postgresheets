@@ -346,16 +346,14 @@ export class ConnectionManager {
             return this.connections.get(id)!;
         }
 
-        // If this connection was explicitly cancelled by the user, don't auto-retry
-        if (!forceReconnect && this.cancelledConnections.has(id)) {
-            return null;
-        }
-
         if (forceReconnect) {
             await this.disconnect(id);
-            // If forcing a reconnect, clear the cancelled flag
-            this.cancelledConnections.delete(id);
         }
+        
+        // Calling connect() is always an explicit request to connect (whether manual
+        // or programmatic), so clear any cancelled flag. This allows users to manually
+        // retry after cancelling a connection attempt.
+        this.cancelledConnections.delete(id);
 
         const pending = this.pendingConnections.get(id);
         if (pending) {

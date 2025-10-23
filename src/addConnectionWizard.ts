@@ -33,11 +33,12 @@ export class AddConnectionWizard {
             const scriptUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'add-connection', 'main.js'));
             const globalStyleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'app.css'));
             const wizardStyleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main5.css'));
+            console.log('Loading Svelte bundle from:', scriptUri.toString());
             panel.webview.html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="${globalStyleUri}">
   <link rel="stylesheet" href="${wizardStyleUri}">
@@ -47,13 +48,13 @@ export class AddConnectionWizard {
   <div id="app">Loading…</div>
   <script nonce="${nonce}">
     window.initialState = {};
-    window.acquireVsCodeApi = acquireVsCodeApi;
   </script>
   <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>
 </html>`;
         } catch (e) {
             // Fallback to inline HTML for dev/testing
+            console.log('Failed to load Svelte bundle, using fallback:', e);
             panel.webview.html = this.buildHtml(nonce, cspSource);
         }
 
@@ -153,7 +154,7 @@ export class AddConnectionWizard {
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>${style}</style>
   <title>Add Connection</title>
@@ -212,7 +213,7 @@ export class AddConnectionWizard {
   </footer>
 
   <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
+    const vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
     const modeRadios = document.querySelectorAll('input[name="mode"]');
     const stringMode = document.getElementById('stringMode');
     const manualMode = document.getElementById('manualMode');
@@ -231,21 +232,30 @@ export class AddConnectionWizard {
       });
     }
 
+    function tryPost(command, payload, onErrorText) {
+      if (!vscode) {
+        statusEl.textContent = onErrorText;
+        return false;
+      }
+      vscode.postMessage({ command, payload });
+      return true;
+    }
+
     document.getElementById('testBtn').addEventListener('click', () => {
       statusEl.textContent = 'Testing...';
       const payload = collectPayload();
-      vscode.postMessage({ command: 'testConnection', payload });
+      tryPost('testConnection', payload, 'Error: VS Code API unavailable');
     });
 
     document.getElementById('saveBtn').addEventListener('click', () => {
       statusEl.textContent = 'Saving...';
       const payload = collectPayload();
       payload.name = (document.getElementById('name').value || '').trim();
-      vscode.postMessage({ command: 'saveConnection', payload });
+      tryPost('saveConnection', payload, 'Error: VS Code API unavailable');
     });
 
     document.getElementById('cancelBtn').addEventListener('click', () => {
-      vscode.postMessage({ command: 'cancel' });
+      tryPost('cancel', undefined, '');
     });
 
     function collectPayload() {

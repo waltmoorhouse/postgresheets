@@ -142,4 +142,43 @@ describe('ConnectionManager cancelConnect', () => {
         expect(updateSpy).not.toHaveBeenCalled();
         expect(secretDeleteSpy).not.toHaveBeenCalled();
     });
+
+    test('manual retry after cancel should succeed', async () => {
+        const ctx = makeContext();
+        const mgr = new ConnectionManager(ctx);
+
+        const config = {
+            id: 'test-retry', name: 'retry-test', host: 'localhost', port: 5432,
+            database: 'db', username: 'user'
+        };
+        jest.spyOn(ctx.globalState, 'get' as any).mockReturnValue([config]);
+        jest.spyOn(ctx.secrets, 'get' as any).mockResolvedValue('pass');
+
+        // Start initial connect attempt (it will hang)
+        const firstAttempt = mgr.connect(config.id, false);
+        await new Promise((r) => setTimeout(r, 20));
+
+        // Cancel it
+        const cancelled = await mgr.cancelConnect(config.id);
+        expect(cancelled).toBe(true);
+
+        // First attempt should resolve to null
+        const firstResult = await firstAttempt;
+        expect(firstResult).toBeNull();
+
+        // Verify the connection is in the cancelled set
+        expect((mgr as any).cancelledConnections.has(config.id)).toBe(true);
+
+        // Now the user manually retries by calling connect() again
+        // This should clear the cancelled flag and allow a new attempt
+        const secondAttempt = mgr.connect(config.id, false);
+        await new Promise((r) => setTimeout(r, 20));
+
+        // The cancelled flag should be cleared now
+        expect((mgr as any).cancelledConnections.has(config.id)).toBe(false);
+
+        // Clean up - cancel the second attempt so the test can complete
+        await mgr.cancelConnect(config.id);
+        await secondAttempt;
+    });
 });

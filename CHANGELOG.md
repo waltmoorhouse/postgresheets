@@ -2,7 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [3.0.2] Oct 22, 2025
+
+### Bug Fixes
+- **Connection Retry After Cancel**: Fixed issue where canceling a connection attempt would prevent manual retries. Users can now cancel a failed connection (e.g., when VPN is off) and successfully retry after fixing the issue. The cancelled flag is now cleared when the user explicitly clicks "Connect", allowing manual retries while still preventing automatic retry loops.
+
+## [3.0.1] Oct 22, 2025
+
+### Bug Fixes
+- Bugfix in Add New Connection screen preventing buttons from working.
+
+## [3.0.0] Oct 22, 2025
 
 ### Bug Fixes
 - **Fixed Missing CSS in Wizards**: Updated CSV Import and Add Connection wizards to reference the correct `app.css` file instead of non-existent `index.css`. This fixes styling issues where the wizards had no styles applied.

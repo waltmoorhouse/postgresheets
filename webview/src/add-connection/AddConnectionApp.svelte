@@ -22,6 +22,7 @@
   let status = '';
   let statusKind: 'info' | 'error' | 'success' | '' = '';
   let pending = false;
+  let previousMode: 'connectionString' | 'manual' = mode;
 
   $: nameError = name.trim().length === 0 ? 'Name is required' : '';
 
@@ -41,12 +42,76 @@
     manualErrors.port = !port || Number.isNaN(p) || p <= 0 || p > 65535 ? 'Port must be a number between 1 and 65535' : '';
   }
 
-  $: canTest = !pending && name.trim().length > 0 && ((mode === 'connectionString' && connStrError === '') || (mode === 'manual' && Object.values(manualErrors).every(v => !v)));
-  $: canSave = canTest;
+  $: canTest = !pending && ((mode === 'connectionString' && connStrError === '') || (mode === 'manual' && Object.values(manualErrors).every(v => !v)));
+  $: canSave = canTest && name.trim().length > 0;
 
   function ensureVscode() {
     if (!vscode) throw new Error('VS Code API unavailable');
     return vscode;
+  }
+
+  function parseConnectionString(value: string) {
+    const input = value.trim();
+    if (!input) return null;
+    try {
+      const url = new URL(input);
+      const databaseName = url.pathname.replace(/^\//, '');
+      return {
+        host: url.hostname,
+        port: url.port || '5432',
+        database: decodeURIComponent(databaseName),
+        username: decodeURIComponent(url.username || ''),
+        password: decodeURIComponent(url.password || ''),
+        ssl: url.searchParams.get('sslmode') === 'require'
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function buildConnectionStringFromManual() {
+    const trimmedHost = host.trim();
+    const trimmedPort = port.trim();
+    const trimmedDatabase = database.trim();
+    const trimmedUser = username.trim();
+
+    if (!trimmedHost) {
+      return null;
+    }
+
+    const scheme = /^postgresql?:\/\//i.test(connStr) ? connStr.match(/^postgresql?:\/\//i)?.[0]?.toLowerCase() ?? 'postgresql://' : 'postgresql://';
+    const userPart = trimmedUser ? encodeURIComponent(trimmedUser) : '';
+    const passwordPart = passwordManual ? `:${encodeURIComponent(passwordManual)}` : '';
+    const auth = userPart ? `${userPart}${passwordPart}@` : '';
+    const portValue = Number(trimmedPort);
+    const portPart = !Number.isNaN(portValue) && portValue > 0 ? `:${portValue}` : '';
+    const hostPart = trimmedHost.includes(':') && !trimmedHost.startsWith('[') && !trimmedHost.endsWith(']') ? `[${trimmedHost}]` : trimmedHost;
+    const dbPart = trimmedDatabase ? `/${encodeURIComponent(trimmedDatabase)}` : '';
+    const sslPart = ssl ? '?sslmode=require' : '';
+
+    return `${scheme.replace(/\/\/$/, '')}//${auth}${hostPart}${portPart}${dbPart}${sslPart}`;
+  }
+
+  $: if (mode !== previousMode) {
+    if (mode === 'manual') {
+      const parsed = parseConnectionString(connStr);
+      if (parsed) {
+        host = parsed.host || '';
+        port = parsed.port || '5432';
+        database = parsed.database || '';
+        username = parsed.username || '';
+        passwordManual = parsed.password || '';
+        ssl = parsed.ssl;
+        password = parsed.password || password;
+      }
+    } else {
+      const built = buildConnectionStringFromManual();
+      if (built) {
+        connStr = built;
+      }
+      password = passwordManual;
+    }
+    previousMode = mode;
   }
 
   function collectPayload() {
@@ -61,7 +126,8 @@
     statusKind = 'info';
     pending = true;
     try {
-      ensureVscode().postMessage({ command: 'testConnection', payload: collectPayload() });
+      const api = ensureVscode();
+      api.postMessage({ command: 'testConnection', payload: collectPayload() });
       // The extension will post back with testResult via window.postMessage, handled below.
     } catch (err) {
       status = String(err);
@@ -73,13 +139,29 @@
     status = 'Saving...';
     statusKind = 'info';
     pending = true;
-    const payload = collectPayload();
-    payload.name = name;
-    ensureVscode().postMessage({ command: 'saveConnection', payload });
+    try {
+      const payload = collectPayload();
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        status = 'Name is required to save';
+        statusKind = 'error';
+        pending = false;
+        return;
+      }
+      payload.name = trimmedName;
+      const api = ensureVscode();
+      api.postMessage({ command: 'saveConnection', payload });
+    } catch (err) {
+      status = String(err);
+      statusKind = 'error';
+    }
   }
 
   function cancel() {
-    ensureVscode().postMessage({ command: 'cancel' });
+    try {
+      ensureVscode().postMessage({ command: 'cancel' });
+    } catch (err) {
+    }
   }
 
   function handleMessage(e: MessageEvent) {
