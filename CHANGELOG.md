@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.1] - Oct 22, 2025
+- Documentation fix
+
 ## [3.1.0] - Oct 22, 2025
 
 ### Added
