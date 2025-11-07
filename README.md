@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/waltmoorhouse/postgresheets/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/build.yml)
 [![Tests](https://github.com/waltmoorhouse/postgresheets/actions/workflows/component-tests.yml/badge.svg?branch=main)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/component-tests.yml)
-[![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)](https://github.com/waltmoorhouse/postgresheets/releases)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/waltmoorhouse/postgresheets/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.md)
 [![Publish](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml/badge.svg?branch=release)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml)
 [![Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/WaltMoorhouse.postgresheets?label=marketplace%20version)](https://marketplace.visualstudio.com/items?itemName=WaltMoorhouse.postgresheets)

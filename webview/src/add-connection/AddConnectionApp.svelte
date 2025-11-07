@@ -3,26 +3,30 @@
   import type { VSCodeApi } from '$lib/types';
 
   export let vscode: VSCodeApi | undefined;
+  export let initialState: any = {};
 
   import PsButton from '$lib/components/PsButton.svelte';
   import Field from '$lib/components/Field.svelte';
 
-  let name = '';
-  let mode: 'connectionString' | 'manual' = 'connectionString';
+  let name = initialState.name || '';
+  let mode: 'connectionString' | 'manual' = initialState.mode || 'connectionString';
   let connStr = '';
-  let password = '';
+  let password = initialState.password || '';
 
-  let host = '';
-  let port = '5432';
-  let database = '';
-  let username = '';
-  let passwordManual = '';
-  let ssl = false;
+  let host = initialState.host || '';
+  let port = initialState.port ? String(initialState.port) : '5432';
+  let database = initialState.database || '';
+  let username = initialState.username || '';
+  let passwordManual = initialState.password || '';
+  let ssl = initialState.ssl || false;
 
   let status = '';
   let statusKind: 'info' | 'error' | 'success' | '' = '';
   let pending = false;
   let previousMode: 'connectionString' | 'manual' = mode;
+  
+  let editMode = initialState.editMode || false;
+  let connectionId = initialState.id || undefined;
 
   $: nameError = name.trim().length === 0 ? 'Name is required' : '';
 
@@ -149,6 +153,8 @@
         return;
       }
       payload.name = trimmedName;
+      payload.editMode = editMode;
+      payload.id = connectionId;
       const api = ensureVscode();
       api.postMessage({ command: 'saveConnection', payload });
     } catch (err) {
@@ -203,7 +209,7 @@
 </style>
 
 <div>
-  <h2>Add Connection</h2>
+  <h2>{editMode ? 'Edit Connection' : 'Add Connection'}</h2>
   <Field label="Name" hint="A friendly name for this connection">
     <input id="name" bind:value={name} placeholder="My Database" />
   </Field>

@@ -120,10 +120,35 @@ export function activate(context: vscode.ExtensionContext) {
             await addConnectionWizard.openWizard();
         }),
 
+        vscode.commands.registerCommand('postgres-editor.addConnectionFromOtherDb', async (item: DatabaseTreeItem) => {
+            // Get the connection config to prefill values
+            if (item && item.connectionId && item.databaseName) {
+                const configs = await connectionManager.getConnections();
+                const config = configs.find(c => c.id === item.connectionId);
+                if (config) {
+                    // Get the stored password but DO NOT include it in the prefill (security)
+                    // const password = await context.secrets.get(`postgres-password-${item.connectionId}`);
+                    // Open wizard with prefilled values, changing the database name to the clicked database
+                    await addConnectionWizard.openWizard({
+                        ...config,
+                        database: item.databaseName, // Use the database from the tree item
+                        name: `${config.name} (${item.databaseName})` // Suggest a new name
+                    });
+                }
+            }
+        }),
+
         vscode.commands.registerCommand('postgres-editor.editConnection', async (item) => {
             if (item && item.connectionId) {
-                await connectionManager.editConnection(item.connectionId);
-                treeProvider.refresh();
+                const configs = await connectionManager.getConnections();
+                const config = configs.find(c => c.id === item.connectionId);
+                if (config) {
+                    // Open wizard with prefilled values and edit mode (do NOT prefill password)
+                    await addConnectionWizard.openWizard({
+                        ...config,
+                        editMode: true
+                    });
+                }
             }
         }),
 
@@ -179,6 +204,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('postgres-editor.disconnect', async (item?: DatabaseTreeItem) => {
             const target = await resolveConnectionTarget(item);
             if (!target) return;
+
+            // Collapse only this connection node via provider model state
+            if (item && item.type === 'connection' && item.connectionId) {
+                try {
+                    treeProvider.collapseConnectionNode(item.connectionId);
+                } catch {
+                    // Non-fatal; continue
+                }
+            }
 
             await connectionManager.disconnect(target.id);
             vscode.window.showInformationMessage(`Disconnected from "${target.name}"`);
