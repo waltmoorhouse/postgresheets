@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.0] - 2025-11-06
+
+### Added
+- Tree view: show the current (connected) database first, then an "Other DBs" folder containing the other databases in the cluster. The connected database remains expandable (schemas/tables). Databases listed under "Other DBs" are non-expandable to avoid querying the wrong database.
+
+### Changed
+- "Other DBs" now lists each other database with an inline "+ Add connection" affordance. Clicking an other-database opens the Add Connection wizard with all connection fields prefilled from the current connection but with the selected database substituted; the user may edit any field before saving.
+
+### Fixed
+- Edit connection: opening Edit on an existing connection now opens the Add Connection wizard in Edit mode with all fields prefilled (except stored password), and saving updates the existing connection rather than creating a duplicate.
+- Connection string handling: passwords embedded in connection strings are now correctly extracted and used so users do not need to re-enter the password in the password box when saving a connection.
+- Webview: the Add/Edit Connection webview now receives and uses an `initialState` payload so fields are populated when opening Add-from-OtherDB or Edit.
+
+### Still broken
+ - Tree view: collapsing connection tree items before disconnecting causes an immediate auto-reconnect when a tree was expanded — the disconnect command should collapses the connection node first to avoid triggering the expansion-driven connect path.
+
 ## [3.1.1] - Oct 22, 2025
 - Documentation fix
 

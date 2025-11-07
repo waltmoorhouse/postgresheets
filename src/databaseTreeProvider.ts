@@ -7,7 +7,7 @@ export class DatabaseTreeItem extends vscode.TreeItem {
     constructor(
         public readonly label: string,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-        public readonly type: 'connection' | 'database' | 'schema' | 'table',
+        public readonly type: 'connection' | 'database' | 'otherDatabases' | 'otherDatabase' | 'schema' | 'table',
         public readonly connectionId?: string,
         public readonly databaseName?: string,
         public readonly schemaName?: string,
@@ -20,6 +20,10 @@ export class DatabaseTreeItem extends vscode.TreeItem {
         if (type === 'connection') {
             this.iconPath = new vscode.ThemeIcon('database');
         } else if (type === 'database') {
+            this.iconPath = new vscode.ThemeIcon('server');
+        } else if (type === 'otherDatabases') {
+            this.iconPath = new vscode.ThemeIcon('folder');
+        } else if (type === 'otherDatabase') {
             this.iconPath = new vscode.ThemeIcon('server');
         } else if (type === 'schema') {
             this.iconPath = new vscode.ThemeIcon('folder');
@@ -40,6 +44,9 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     private refreshTimeout: NodeJS.Timeout | undefined;
     private pendingRefresh = false;
     private lastKnownStatuses = new Map<string, ConnectionStatus>();
+    // Track collapsed/expanded state for connection nodes so we can programmatically
+    // collapse a single connection without affecting others.
+    private connectionCollapsedState = new Map<string, boolean>();
 
     constructor(private connectionManager: ConnectionManager) {
         this.connectionManager.onStatusChange((event) => {
@@ -54,6 +61,18 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
     }
 
     refresh(): void {
+        this._onDidChangeTreeData.fire();
+    }
+
+    // Collapse a specific connection node programmatically (model-driven)
+    collapseConnectionNode(connectionId: string): void {
+        this.connectionCollapsedState.set(connectionId, true);
+        this._onDidChangeTreeData.fire();
+    }
+
+    // Optional: expand helper if needed elsewhere
+    expandConnectionNode(connectionId: string): void {
+        this.connectionCollapsedState.set(connectionId, false);
         this._onDidChangeTreeData.fire();
     }
 
@@ -95,12 +114,17 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
         }
 
         if (element.type === 'connection') {
-            // Show databases
+            // Show the connected database and "Other DBs" folder
             return this.getDatabases(element.connectionId!);
         }
 
+        if (element.type === 'otherDatabases') {
+            // Show other databases (non-expandable)
+            return this.getOtherDatabases(element.connectionId!);
+        }
+
         if (element.type === 'database') {
-            // Show schemas
+            // Show schemas for the connected database
             return this.getSchemas(element.connectionId!, element.databaseName!);
         }
 
@@ -116,12 +140,18 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
         const configs = await this.connectionManager.getConnections();
         return configs.map(config => {
             const status = this.connectionManager.getConnectionStatus(config.id);
+            const collapsed = this.connectionCollapsedState.get(config.id);
+            const collapsibleState = collapsed === false
+                ? vscode.TreeItemCollapsibleState.Expanded
+                : vscode.TreeItemCollapsibleState.Collapsed;
             const item = new DatabaseTreeItem(
                 config.name,
-                vscode.TreeItemCollapsibleState.Collapsed,
+                collapsibleState,
                 'connection',
                 config.id
             );
+            // Provide a stable id so VS Code can track the item across refreshes
+            item.id = config.id;
 
             item.iconPath = this.getStatusIcon(status);
             // Description uses a shape glyph plus a short textual status so
@@ -146,21 +176,96 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseTre
         this.connectionManager.markBusy(connectionId);
 
         try {
+            // Get the connection config to find the connected database
+            const configs = await this.connectionManager.getConnections();
+            const config = configs.find(c => c.id === connectionId);
+            if (!config) return [];
+
             const result = await client.query(`
                 SELECT datname FROM pg_database 
                 WHERE datistemplate = false 
                 ORDER BY datname
             `);
 
-            return result.rows.map(row => 
-                new DatabaseTreeItem(
-                    row.datname,
+            const databases = result.rows.map(row => row.datname);
+            const connectedDb = config.database;
+            
+            const items: DatabaseTreeItem[] = [];
+            
+            // Add the connected database first (expandable)
+            items.push(new DatabaseTreeItem(
+                connectedDb,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'database',
+                connectionId,
+                connectedDb
+            ));
+
+            // Add "Other DBs" folder if there are other databases
+            const otherDbs = databases.filter(db => db !== connectedDb);
+            if (otherDbs.length > 0) {
+                const otherDbsItem = new DatabaseTreeItem(
+                    'Other DBs',
                     vscode.TreeItemCollapsibleState.Collapsed,
-                    'database',
-                    connectionId,
-                    row.datname
-                )
-            );
+                    'otherDatabases',
+                    connectionId
+                );
+                items.push(otherDbsItem);
+            }
+
+            return items;
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to load databases: ${error}`);
+            return [];
+        } finally {
+            this.connectionManager.markIdle(connectionId);
+        }
+    }
+
+    private async getOtherDatabases(connectionId: string): Promise<DatabaseTreeItem[]> {
+        // Get list of all databases except the connected one
+        let client = await this.connectionManager.getClient(connectionId);
+        if (!client) {
+            client = await this.connectionManager.connect(connectionId);
+            if (!client) return [];
+        }
+
+        this.connectionManager.markBusy(connectionId);
+
+        try {
+            const configs = await this.connectionManager.getConnections();
+            const config = configs.find(c => c.id === connectionId);
+            if (!config) return [];
+
+            const result = await client.query(`
+                SELECT datname FROM pg_database 
+                WHERE datistemplate = false 
+                ORDER BY datname
+            `);
+
+            const connectedDb = config.database;
+            
+            // Return non-expandable items for other databases with "+ Add connection" 
+            return result.rows
+                .filter(row => row.datname !== connectedDb)
+                .map(row => {
+                    const item = new DatabaseTreeItem(
+                        row.datname,
+                        vscode.TreeItemCollapsibleState.None,
+                        'otherDatabase',
+                        connectionId,
+                        row.datname
+                    );
+                    // Add the "+ Add connection" description and command
+                    item.description = '+ Add connection';
+                    item.tooltip = `Click to add a new connection to ${row.datname}`;
+                    item.command = {
+                        command: 'postgres-editor.addConnectionFromOtherDb',
+                        title: 'Add Connection',
+                        arguments: [item]
+                    };
+                    return item;
+                });
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load databases: ${error}`);
             return [];
