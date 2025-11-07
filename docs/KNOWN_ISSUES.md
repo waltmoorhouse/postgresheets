@@ -2,6 +2,12 @@
 
 ## Current Known Issues
 
+### Expanded Databases Reconnect on Close
+
+**Issue:** Not Collapsing connection tree items before disconnecting causes an immediate auto-reconnect when a tree was expanded — the disconnect command should collapses the connection node first to avoid triggering the expansion-driven connect path.
+
+**Workaround:** Collapse the tree manually before clicking Disconnect
+
 ### Pagination Performance with Large Offsets
 
 **Issue:** Pagination using `OFFSET` becomes slower with very large offset values (10,000+ rows).
