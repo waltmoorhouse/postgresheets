@@ -521,7 +521,7 @@
                       {:else}
                         <button
                           type="button"
-                          class="ps-btn ps-btn--ghost"
+                          class={`ps-btn ${column.isNew ? 'ps-btn--ghost' : 'ps-btn--danger'}`}
                           on:click={() => toggleDrop(column)}
                         >
                           {column.isNew ? 'Remove' : 'Drop'}

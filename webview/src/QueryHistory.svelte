@@ -34,9 +34,6 @@
     return true;
   }
 
-  function refresh() {
-    vscode?.postMessage({ command: 'refresh' });
-  }
 
   function clearAll() {
     vscode?.postMessage({ command: 'clear' });
@@ -56,7 +53,6 @@
 
   onMount(() => {
     // Signal ready
-    console.log('[QueryHistory webview] mounted');
     vscode?.postMessage({ command: 'ready' });
 
     window.addEventListener('message', (ev: MessageEvent) => {
@@ -90,8 +86,7 @@
 <div class="toolbar">
   <div>Query History</div>
   <div class="buttons">
-    <button on:click={refresh}>🔄 Refresh</button>
-    <button on:click={clearAll}>🗑️ Clear</button>
+    <button type="button" class="ps-btn ps-btn--danger" on:click={clearAll} aria-label="Clear all history">🗑️ Clear</button>
   </div>
 </div>
 
@@ -107,9 +102,9 @@
         </div>
         <div class="query">{entry.query}</div>
         <div style="margin-top:6px; display:flex; gap:8px;">
-          {#if canOpenInEditor(entry.query)}<button on:click={() => openInEditor(entry)}>📊 Open</button>{/if}
-          <button on:click={() => copyQuery(entry.query)}>📋 Copy</button>
-          <button on:click={() => deleteEntry(entry.id)}>🗑️ Delete</button>
+          {#if canOpenInEditor(entry.query)}<button type="button" class="ps-btn ps-btn--primary" on:click={() => openInEditor(entry)}>📊 Open</button>{/if}
+          <button type="button" class="ps-btn ps-btn--ghost" on:click={() => copyQuery(entry.query)}>📋 Copy</button>
+          <button type="button" class="ps-btn ps-btn--danger" on:click={() => deleteEntry(entry.id)}>🗑️ Delete</button>
         </div>
       </div>
     {/each}

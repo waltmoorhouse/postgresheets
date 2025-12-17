@@ -1513,7 +1513,7 @@
         <button type="button" class="ps-btn ps-btn--primary" on:click={addRow}>Add row</button>
         <button
           type="button"
-          class="ps-btn ps-btn--ghost"
+          class="ps-btn ps-btn--danger"
           on:click={deleteSelected}
           disabled={!rows.some((row) => row.selected)}
         >

@@ -101,45 +101,17 @@
 
             const html = this.getHtmlContent(webviewView.webview);
             webviewView.webview.html = html;
-            try {
-                console.log('[QueryHistoryView] HTML length:', html.length, 'preview:', html.slice(0, 200).replace(/\n/g, ' '));
 
-                // Diagnostics: check for problematic substrings that may break document.write in host
-                const firstScriptIndex = html.indexOf('</script>');
-                const lastScriptIndex = html.lastIndexOf('</script>');
-                const nullByteIndex = html.indexOf('\u0000');
-                const hasBacktick = html.indexOf('`') !== -1;
-
-                console.log('[QueryHistoryView] Diagnostics: first </script> at', firstScriptIndex, 'last </script> at', lastScriptIndex, 'nullByteIndex', nullByteIndex, 'hasBacktick', hasBacktick);
-
-                // Log a sample around the closing script tag for inspection
-                try {
-                    const sample = html.slice(Math.max(0, lastScriptIndex - 200), Math.min(html.length, lastScriptIndex + 200));
-                    console.log('[QueryHistoryView] Sample near closing </script>:', sample);
-                } catch (e) {
-                    console.warn('[QueryHistoryView] Failed to sample around closing </script>', e);
-                }
-
-                // Check for problematic unicode characters
-                const hasU2028 = html.indexOf('\u2028') !== -1 || html.indexOf('\u2029') !== -1;
-                const controlMatches = html.match(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g);
-                console.log('[QueryHistoryView] Unicode/control diagnostics: hasU2028:', hasU2028, 'controlMatchesCount:', controlMatches ? controlMatches.length : 0);
-
-            } catch (e) {
-                console.error('[QueryHistoryView] Failed to log HTML preview', e);
-            }
 
             // Handle webview disposal
             webviewView.onDidDispose(() => {
-                console.log('[QueryHistoryView] Webview disposed');
-                this._view = undefined;
+
             });
 
             // When visibility changes (e.g., user opens the panel), refresh to ensure the webview has up-to-date data
             if (typeof (webviewView as any).onDidChangeVisibility === 'function') {
                 (webviewView as any).onDidChangeVisibility(() => {
                     if (webviewView.visible) {
-                        console.log('[QueryHistoryView] View became visible, refreshing');
                         this.refresh();
                     }
                 });
@@ -158,7 +130,6 @@
                         try {
                             await vscode.commands.executeCommand('postgres-editor.refreshQueryHistory');
                         } catch (e) {
-                            console.log('[QueryHistoryView] Failed to request refresh from extension:', e);
                             // Fallback: send a basic refresh without connection annotations
                             this.refresh();
                         }
@@ -186,7 +157,6 @@
                         await this.openQueryInEditor(message.entry);
                         break;
                     case 'historyLoaded':
-                        console.log('[QueryHistoryView] Webview ACK - loaded history', message.count, 'entries, pingId:', message.pingId);
                         if (message.pingId && this._pendingPings.has(message.pingId)) {
                             this._pendingPings.delete(message.pingId);
                         }
@@ -201,11 +171,10 @@
         public refresh(): void {
             if (this._view) {
                 const entries = this.queryHistory.getRecent(100);
-                console.log(`[QueryHistoryView] Refreshing with ${entries.length} entries`);
                 const payload = { command: 'loadHistory', entries: entries, activeConnectionIds: [], pingId: Date.now() };
                 this._sendWithAck(payload);
             } else {
-                console.log('[QueryHistoryView] Refresh called but view not initialized');
+                // view not initialized
             }
         }
 
@@ -215,11 +184,10 @@
         public refreshWithConnections(activeConnectionIds: string[]): void {
             if (this._view) {
                 const entries = this.queryHistory.getRecent(100);
-                console.log(`[QueryHistoryView] Refreshing with ${entries.length} entries and ${activeConnectionIds.length} active connections`);
                 const payload = { command: 'loadHistory', entries: entries, activeConnectionIds: activeConnectionIds, pingId: Date.now() };
                 this._sendWithAck(payload);
             } else {
-                console.log('[QueryHistoryView] RefreshWithConnections called but view not initialized');
+                // view not initialized
             }
         }
 
@@ -228,7 +196,6 @@
          */
         private _sendWithAck(payload: any) {
             if (!this._view) {
-                console.log('[QueryHistoryView] Cannot send payload, view not initialized');
                 return;
             }
 
@@ -238,8 +205,7 @@
 
             const trySend = () => {
                 if (!this._view) return;
-                const result = this._view!.webview.postMessage(payload);
-                console.log('[QueryHistoryView] postMessage result:', result, 'pingId:', pingId, 'retry:', this._pingRetries.get(pingId));
+this._view!.webview.postMessage(payload);
 
                 // set timeout to check ack
                 setTimeout(() => {
@@ -254,7 +220,6 @@
                     }
 
                     this._pingRetries.set(pingId, retries);
-                    console.log(`[QueryHistoryView] Retrying loadHistory (pingId ${pingId}), attempt ${retries}`);
                     trySend();
                 }, 500);
             };
@@ -401,7 +366,6 @@
             } catch (e) {
                 // Tests and some environments may not provide extensionUri or webview.asWebviewUri.
                 // Fall back to a minimal HTML payload which does not reference extension assets.
-                console.warn('[QueryHistoryView] Failed to build resource URIs, using minimal fallback HTML', e);
                 return `<!DOCTYPE html><html><body><div id="app">Loading…</div><script nonce="${nonce}">window.initialState=${initialState};</script></body></html>`;
             }
         }

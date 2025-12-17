@@ -22,6 +22,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **Query History View**: Fixed Copy and Delete actions in the Query History webview using safe escaping and event delegation; the view now annotates entries whose connection has been removed and auto-refreshes when new queries are executed.
+- **Query History Webview (Svelte)**: Migrated the Query History webview to a Svelte bundle loaded via `webview.asWebviewUri`, added a robust ping/ack handshake and a lightweight fallback renderer for resilience against host-side inline HTML/JS corruption; added unit tests for the handshake and loader behavior.
+- **Query History UI**: "Open" now uses `ps-btn--primary` (solid blue); Delete/Clear/Delete Selected now use `ps-btn--danger` (solid red) with a subtle red hover glow and accessible focus outlines.
+- **Global Styling**: Added box-shadow transitions and blue hover glow for primary buttons; strengthened `.ps-btn--danger` selectors and added `.drop-btn` rules so static HTML-based views (Index Manager, Drop Table) reliably show danger styling.
+- **Schema Designer**: Drop action now applies danger styling when performing a destructive Drop ("Remove" for new objects remains a ghost button).
 - **Large Query Handling**: Terminal warns when executing very large SQL strings and protects the input buffer with a configurable max line length.
 - **Fallback Mode**: If advanced line editing fails, the terminal falls back to a simple input mode to avoid blocking the user.
 - **Query History UI**: Moved the Query History view from the Explorer panel to the **PostgreSQL Editor** side panel. The activity bar now reads **PostgreSQL Editor** and contains a **Connections** section at the top and **Query History** at the bottom.
@@ -202,6 +206,7 @@ All notable changes to this project will be documented in this file.
 	- Small component source fixes so the components compile under the test transform (removed inline `as` TypeScript casts in event attributes which confused the Svelte parser in tests).
 	- Added `test:prepare-webview` and `test:components:ci` npm scripts and updated CI workflow to install webview dev dependencies before running component tests.
 	- Added `tsconfig.test.json` and ambient test types so jest-dom matchers are available to TypeScript in tests; re-enabled unguarded jest-dom assertions.
+- Rebuilt webview assets after Svelte migration and added unit/integration tests for the Query History loader, handshake, and UI button styling; full test suite passing locally (34 test suites, 234 tests, 2 skipped at time of release).
 
 Files changed (high level): `jest.config.cjs`, `test/jest.setup.js`, `tsconfig.test.json`, `test/test-ambient.d.ts`, `package.json` (scripts + devDeps), `.github/workflows/component-tests.yml`, `webview/svelte.config.js`, `webview/tsconfig.json`, and small Svelte source edits for component tests.
 

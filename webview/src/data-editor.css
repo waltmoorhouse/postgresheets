@@ -128,13 +128,14 @@
   padding: calc(var(--ps-spacing-xs) + 2px) var(--ps-spacing-md);
   cursor: pointer;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
-    transform 160ms ease;
+    transform 160ms ease, box-shadow 160ms ease;
   min-height: 30px;
   text-decoration: none;
 }
 
 .ps-btn:hover:enabled {
   background: color-mix(in srgb, var(--ps-accent) 20%, var(--ps-surface-subtle));
+  box-shadow: 0 8px 24px rgba(55,148,255,0.14), 0 0 12px rgba(55,148,255,0.12);
 }
 
 /* Column manager styles moved to ColumnManager.svelte */
