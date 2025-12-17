@@ -88,6 +88,9 @@ try {
 - Activity bar icon: `"$(database)"`
 - Command palette integration via `contributes.commands`
 
+## Implementation Plans
+Implementation Plans are PLANNING DOCUMENTS that define work that needs to be done. If you are writing code, you are NO LONGER PLANNING. In the Planning phase there should be NO CODE WRITTEN. Writing code in Markdown is not the goal. The goal is to break down the task into steps. The step should tell what it does and how it relates to other parts of the applicaiton but SHOULD NOT CONTAIN CODE. I have no desire to copy code from markdown docs into the correct spot of the code. CODE SHOULD BE WRITTEN ONLY AFTER THE PLAN IS APPROVED, otherwise you could generate several thousand lines of code that does something we don't want to do.  The plan MUST BE APPROVED BY THE MAINTAINERS BEFORE CODE IS WRITTEN.
+
 ## Common Modifications
 
 ### Adding Database Support
@@ -110,3 +113,6 @@ try {
 ## Changelog
 - Always update CHANGELOG.md when adding features or fixing major bugs
 - Always ensure the KNOWN_ISSUES, README, MANUAL_TESTING_CHECKLIST, and TESTING docs are updated when necessary, instead of creating new documents.
+
+## Forbidden
+- You are not to perform ANY operations related to creating commits or PRs. DO NOT run ANY git commands without prior authorization.

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.3] - 2025-12-16
+
+### Added
+- **SQL Terminal: Advanced Line Editing**: The SQL terminal now supports Bash/Zsh-like line editing with cursor movement, word navigation, and common shortcuts (Ctrl+A/Ctrl+E, Alt+Left/Alt+Right). Editing preserves the current partial command when navigating history.
+
+### Changed
+- **Query History View**: Fixed Copy and Delete actions in the Query History webview using safe escaping and event delegation; the view now annotates entries whose connection has been removed and auto-refreshes when new queries are executed.
+- **Large Query Handling**: Terminal warns when executing very large SQL strings and protects the input buffer with a configurable max line length.
+- **Fallback Mode**: If advanced line editing fails, the terminal falls back to a simple input mode to avoid blocking the user.
+
 ## [3.2.2] - 2025-12-16
 
 ### Changed

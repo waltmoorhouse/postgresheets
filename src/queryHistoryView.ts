@@ -62,7 +62,22 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
             const entries = this.queryHistory.getRecent(100);
             this._view.webview.postMessage({
                 command: 'loadHistory',
-                entries: entries
+                entries: entries,
+                activeConnectionIds: []
+            });
+        }
+    }
+
+    /**
+     * Refresh and include active connection ids to annotate deleted connections in view
+     */
+    public refreshWithConnections(activeConnectionIds: string[]): void {
+        if (this._view) {
+            const entries = this.queryHistory.getRecent(100);
+            this._view.webview.postMessage({
+                command: 'loadHistory',
+                entries: entries,
+                activeConnectionIds: activeConnectionIds
             });
         }
     }
@@ -235,6 +250,15 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
             vscode.postMessage({ command: 'delete', id });
         }
 
+        function escapeHtml(str) {
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function formatDate(timestamp) {
             const date = new Date(timestamp);
             const now = new Date();
@@ -264,35 +288,60 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                 return;
             }
 
-            container.innerHTML = historyEntries.map(entry => {
-                const escapedQuery = entry.query.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-                return \`
-                <div class="history-entry">
-                    <div class="entry-header">
-                        <div class="entry-meta">
-                            <span class="entry-connection">\${entry.connectionName}</span>
-                            \${entry.databaseName ? \` @ \${entry.databaseName}\` : ''}
-                        </div>
-                        <div class="entry-meta entry-time">
-                            \${formatDate(entry.timestamp)}
-                            \${entry.executionTime ? \` • \${entry.executionTime}ms\` : ''}
-                        </div>
-                    </div>
-                    <div class="entry-query">\${entry.query}</div>
-                    <div class="entry-actions">
-                        <button onclick='copyQuery("\${escapedQuery}")'>📋 Copy</button>
-                        <button class="secondary" onclick="deleteEntry('\${entry.id}')">🗑️ Delete</button>
-                    </div>
-                </div>
-                \`;
+            container.innerHTML = historyEntries.map((entry, index) => {
+                const escapedQuery = escapeHtml(entry.query);
+                const deletedNote = (activeConnectionIds && activeConnectionIds.indexOf(entry.connectionId) === -1) ? ' (deleted)' : '';
+                let s = '';
+                s += '                <div class="history-entry" data-entry-index="' + index + '" data-entry-id="' + entry.id + '">\n';
+                s += '                    <div class="entry-header">\n';
+                s += '                        <div class="entry-meta">\n';
+                s += '                            <span class="entry-connection">' + entry.connectionName + deletedNote + '</span>' + (entry.databaseName ? ' @ ' + entry.databaseName : '') + '\n';
+                s += '                        </div>\n';
+                s += '                        <div class="entry-meta entry-time">\n';
+                s += '                            ' + formatDate(entry.timestamp) + (entry.executionTime ? ' • ' + entry.executionTime + 'ms' : '') + '\n';
+                s += '                        </div>\n';
+                s += '                    </div>\n';
+                s += '                    <div class="entry-query" data-entry-id="' + entry.id + '">' + escapedQuery + '</div>\n';
+                s += '                    <div class="entry-actions">\n';
+                s += '                        <button class="copy-btn" data-entry-id="' + entry.id + '">📋 Copy</button>\n';
+                s += '                        <button class="delete-btn secondary" data-entry-id="' + entry.id + '">🗑️ Delete</button>\n';
+                s += '                    </div>\n';
+                s += '                </div>\n';
+                return s;
             }).join('');
         }
 
+// Delegate clicks for copy/delete (single handler)
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            if (!(target instanceof HTMLElement)) return;
+
+            // Copy
+            const copyBtn = target.closest('.copy-btn');
+            if (copyBtn) {
+                const idxAttr = copyBtn.getAttribute('data-entry-id');
+                const entry = entries.find(en => en.id === idxAttr);
+                if (entry) copyQuery(entry.query);
+                return;
+            }
+
+            // Delete
+            const delBtn = target.closest('.delete-btn');
+            if (delBtn) {
+                const id = delBtn.getAttribute('data-entry-id');
+                if (id) deleteEntry(id);
+                return;
+            }
+        });
+
         // Listen for messages from the extension
+        let activeConnectionIds = [];
+
         window.addEventListener('message', event => {
             const message = event.data;
             switch (message.command) {
                 case 'loadHistory':
+                    activeConnectionIds = message.activeConnectionIds || [];
                     renderHistory(message.entries);
                     break;
             }

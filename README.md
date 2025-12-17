@@ -173,6 +173,22 @@ However, when using code created with GenAI (or really when installing any VSCod
 
 The extension automatically tracks executed queries for easy reference and reuse:
 
+### SQL Terminal (Integrated)
+
+A lightweight SQL terminal is available via Command Palette ("PostgreSQL: Open SQL Terminal"). It provides a connection-aware prompt and supports rich line editing similar to bash/zsh:
+
+- Cursor movement: Left/Right arrows
+- History navigation: Up/Down to cycle previous queries (preserves current partial input)
+- Word navigation: Alt+Left / Alt+Right (and Alt+B / Alt+F alternates)
+- Jump to start/end: Ctrl+A / Ctrl+E
+- Backspace/Delete and Ctrl+C to cancel
+- Very large SQL strings produce a warning before execution
+
+See `docs/KEYBOARD_SHORTCUTS.md` for a complete list of supported keys and behaviors.
+
+The Query History view has also been improved: Copy and Delete buttons now work correctly and the view annotates entries whose connection has been removed.
+
+
 1. **View Query History:**
    - Use Command Palette: `PostgreSQL: Show Query History`
    - Quick pick dialog shows recent queries with metadata:

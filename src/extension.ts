@@ -432,8 +432,10 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        vscode.commands.registerCommand('postgres-editor.refreshQueryHistory', () => {
-            queryHistoryView.refresh();
+        vscode.commands.registerCommand('postgres-editor.refreshQueryHistory', async () => {
+            const configs = await connectionManager.getConnections();
+            const ids = configs.map(c => c.id);
+            queryHistoryView.refreshWithConnections(ids);
         }),
 
         vscode.commands.registerCommand('postgres-editor.openSqlTerminal', async (item?: DatabaseTreeItem) => {
