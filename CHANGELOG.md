@@ -2,8 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.2] - 2025-12-16
+
+### Changed
+- **Query History UI**: Moved the Query History view from the Explorer panel to the **PostgreSQL Editor** side panel. The activity bar now reads **PostgreSQL Editor** and contains a **Connections** section at the top and **Query History** at the bottom.
+
 ## [3.2.1] - 2025-11-06
 
+### Changed
 - Documentation update
 
 ## [3.2.0] - 2025-11-06
@@ -187,5 +193,28 @@ Files changed (high level): `jest.config.cjs`, `test/jest.setup.js`, `tsconfig.t
 ## [1.0.27] - 2025-10-12
 - Phase 6 testing completion
 
-## [1.0.26] - previous
+## [1.0.26]
 - Phase 5 completion (graphical workflows)
+
+## [1.0.27]
+- Phase 6 testing completion
+- Comprehensive test suite
+- Known issues documented
+
+## [1.0.26]
+- Phase 5 complete (graphical workflows)
+- Create Table Wizard
+- Drop Table Wizard
+- Schema Designer
+
+## [1.0.20-1.0.25]
+- Phase 4 (Schema Designer)
+- Phase 3 (Visual refinement)
+- Phase 2 (Enhanced grid)
+- Phase 1 (Svelte migration)
+
+## [1.0.0-1.0.19]
+- Initial release
+- Basic CRUD operations
+- Tree view provider
+- HTML-based webviews (pre-Svelte)
