@@ -163,13 +163,14 @@ export class PermissionsManagerView {
             return acc;
         }, {} as Record<string, TablePermission[]>);
 
+        const escapeAttr = (s: string): string => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const permissionRows = Object.entries(grouped).map(([grantee, perms]) => `
             <tr>
                 <td>${grantee}</td>
                 <td>${perms.map(p => p.privilege).join(', ')}</td>
                 <td>${perms.some(p => p.isGrantable) ? 'Yes' : 'No'}</td>
                 <td>
-                    <button onclick="revoke('${grantee}')">Revoke</button>
+                    <button class="revoke-btn" data-role="${escapeAttr(grantee)}">Revoke</button>
                 </td>
             </tr>
         `).join('');
@@ -221,8 +222,8 @@ export class PermissionsManagerView {
     <h1>Permissions - ${schemaName}.${tableName}</h1>
     
     <div class="toolbar">
-        <button onclick="grant()">Grant Permissions</button>
-        <button onclick="refresh()">Refresh</button>
+        <button id="grantBtn">Grant Permissions</button>
+        <button id="refreshBtn">Refresh</button>
     </div>
 
     <table>
@@ -245,14 +246,23 @@ export class PermissionsManagerView {
         function grant() {
             vscode.postMessage({ command: 'grant' });
         }
-        
-        function revoke(role) {
-            vscode.postMessage({ command: 'revoke', role });
-        }
-        
-        function refresh() {
-            vscode.postMessage({ command: 'refresh' });
-        }
+
+        // Hook up toolbar and delegate revoke actions
+        const grantBtn = document.getElementById('grantBtn');
+        if (grantBtn) grantBtn.addEventListener('click', grant);
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
+
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            if (!(target instanceof HTMLElement)) return;
+            const revokeBtn = target.closest('.revoke-btn');
+            if (revokeBtn) {
+                const role = revokeBtn.getAttribute('data-role');
+                if (role) vscode.postMessage({ command: 'revoke', role });
+                return;
+            }
+        });
 
         window.addEventListener('message', event => {
             const message = event.data;

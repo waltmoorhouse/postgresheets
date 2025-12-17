@@ -2,20 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.2.3] - 2025-12-16
+## [3.3.0] - 2025-12-17
 
 ### Added
+- @vercel/ncc bundling of extension
+- **Custom WHERE Clause Filtering**: Data Editor now supports custom SQL WHERE clauses for advanced table filtering
+  - Add custom WHERE clause input field in the toolbar (e.g., `id < 1000 AND name != 'Admin'`)
+  - WHERE clause combines with existing column filters and search using AND logic
+  - "Convert Filters" button generates SQL conditions from active column filters, then clears the filters
+  - Allows users to test filters visually, then convert to SQL for more complex queries
+  - WHERE clause persists when navigating between pages
+  - Pagination, sorting, and editing all work seamlessly with custom WHERE clauses
+- **Query History "Open in Editor"**: Simple SELECT queries can now be opened directly in the Data Editor
+  - "Open in Editor" button appears for compatible SELECT queries (single-table, no JOINs/subqueries)
+  - Automatically extracts table name and WHERE clause from query
+  - Opens the table in Data Editor with WHERE clause prefilled
+  - Provides seamless workflow from query execution to visual data exploration
 - **SQL Terminal: Advanced Line Editing**: The SQL terminal now supports Bash/Zsh-like line editing with cursor movement, word navigation, and common shortcuts (Ctrl+A/Ctrl+E, Alt+Left/Alt+Right). Editing preserves the current partial command when navigating history.
 
 ### Changed
 - **Query History View**: Fixed Copy and Delete actions in the Query History webview using safe escaping and event delegation; the view now annotates entries whose connection has been removed and auto-refreshes when new queries are executed.
 - **Large Query Handling**: Terminal warns when executing very large SQL strings and protects the input buffer with a configurable max line length.
 - **Fallback Mode**: If advanced line editing fails, the terminal falls back to a simple input mode to avoid blocking the user.
-
-## [3.2.2] - 2025-12-16
-
-### Changed
 - **Query History UI**: Moved the Query History view from the Explorer panel to the **PostgreSQL Editor** side panel. The activity bar now reads **PostgreSQL Editor** and contains a **Connections** section at the top and **Query History** at the bottom.
+
+### Technical Details
+- New message types: `applyCustomWhere` and `convertFiltersToWhere`
+- Query parser utility (`queryParser.ts`) for SELECT statement analysis
+- Enhanced `DataEditor.openTable()` to accept optional WHERE clause parameter
+- New command: `postgres-editor.openTableWithWhere` for programmatic table opening with filters
 
 ## [3.2.1] - 2025-11-06
 

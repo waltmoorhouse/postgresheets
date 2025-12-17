@@ -561,13 +561,14 @@ export class SqlTerminalProvider {
             const executionTime = Date.now() - startTime;
 
             // Log to query history
+            console.log(`[SqlTerminal] Adding query to history: ${sql.substring(0, 50)}...`);
             await this.queryHistory.addQuery(sql, connectionId, connectionName, database, executionTime);
 
             // Notify Query History view to refresh (if open)
             try {
                 await vscode.commands.executeCommand('postgres-editor.refreshQueryHistory');
             } catch (e) {
-                // ignore if command not available
+                console.log('[SqlTerminal] Failed to refresh query history view:', e);
             }
 
             // Display results

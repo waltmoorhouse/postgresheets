@@ -376,15 +376,8 @@ npm run watch
 npm run test
 ```
 
-### Publishing
-
-To publish to the VSCode Marketplace:
-
-1. Update `publisher` field in package.json
-2. Create a Personal Access Token from Azure DevOps
-3. Install vsce: `npm install -g @vscode/vsce`
-4. Package: `vsce package`
-5. Publish: `vsce publish`
+## Note
+For some reason, installing by right clicking on the VSIX file is failing, you should install a locally built version using the command line `code --install-extension postgresheers-${VERSION}.vsix` which works fine.
 
 ## Security
 

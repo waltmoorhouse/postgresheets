@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "3.2.2",
+  "version": "3.2.5",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -16,7 +16,7 @@
     "Other"
   ],
   "activationEvents": [],
-  "main": "./out/extension.js",
+  "main": "./dist/index.js",
   "contributes": {
     "commands": [
       {
@@ -318,8 +318,13 @@
   },
   "scripts": {
     "vscode:package": "npm run vscode:prepublish && npx vsce package",
-    "vscode:prepublish": "npm run build:webview && rm -rf out && npm run compile",
+    "vscode:prepublish": "npm run build:webview && npm run build:extension && npm run clean:out && npm run validate:manifest-main",
     "compile": "tsc -p ./",
+    "clean": "rm -rf dist",
+    "clean:out": "rm -rf out",
+    "bundle": "npx @vercel/ncc build ./out/extension.js -o dist --source-map --external vscode",
+    "build:extension": "npm run compile && npm run bundle",
+    "validate:manifest-main": "node -e \"const p=require('./package.json'); const fs=require('fs'); if(!p.main) { console.error('package.json missing main field'); process.exit(1); } if(!fs.existsSync(p.main)) { console.error('Main file not found:', p.main); process.exit(1); } console.log('Manifest main exists:', p.main);\"",
     "watch": "tsc -watch -p ./",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --config=jest.config.cjs",
     "test:components": "jest --testPathPatterns='./test/.*\\.(spec|test)\\.(ts|js)$'",
@@ -338,7 +343,9 @@
     "@types/node": "^20.x",
     "@types/pg": "^8.15.5",
     "@types/vscode": "^1.80.0",
+    "@vercel/ncc": "^0.34.0",
     "babel-jest": "^30.2.0",
+    "baseline-browser-mapping": "^2.9.8",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
     "jest-mock-fs": "^1.0.2",
@@ -351,6 +358,15 @@
     "vite": "^7.1.9",
     "vsce": "^2.15.0"
   },
+  "files": [
+    "dist/**",
+    "media/**",
+    "images/**",
+    "README.md",
+    "LICENSE.md",
+    "CHANGELOG.md",
+    "package.json"
+  ],
   "dependencies": {
     "pg": "^8.11.0"
   }

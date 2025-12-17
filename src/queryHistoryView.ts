@@ -12,6 +12,11 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private readonly queryHistory: QueryHistory;
 
+    // Track pending loadHistory pings so we can detect if webview never acknowledges receipt
+    private _pendingPings: Set<number> = new Set();
+    private _pingRetries: Map<number, number> = new Map();
+    private readonly MAX_PING_RETRIES = 3;
+
     constructor(
         private readonly context: vscode.ExtensionContext,
         queryHistory: QueryHistory
@@ -31,7 +36,51 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
             localResourceRoots: [this.context.extensionUri]
         };
 
-        webviewView.webview.html = this.getHtmlContent(webviewView.webview);
+        const html = this.getHtmlContent(webviewView.webview);
+        webviewView.webview.html = html;
+        try {
+            console.log('[QueryHistoryView] HTML length:', html.length, 'preview:', html.slice(0, 200).replace(/\n/g, ' '));
+
+            // Diagnostics: check for problematic substrings that may break document.write in host
+            const firstScriptIndex = html.indexOf('</script>');
+            const lastScriptIndex = html.lastIndexOf('</script>');
+            const nullByteIndex = html.indexOf('\u0000');
+            const hasBacktick = html.indexOf('`') !== -1;
+
+            console.log('[QueryHistoryView] Diagnostics: first </script> at', firstScriptIndex, 'last </script> at', lastScriptIndex, 'nullByteIndex', nullByteIndex, 'hasBacktick', hasBacktick);
+
+            // Log a sample around the closing script tag for inspection
+            try {
+                const sample = html.slice(Math.max(0, lastScriptIndex - 200), Math.min(html.length, lastScriptIndex + 200));
+                console.log('[QueryHistoryView] Sample near closing </script>:', sample);
+            } catch (e) {
+                console.warn('[QueryHistoryView] Failed to sample around closing </script>', e);
+            }
+
+            // Check for problematic unicode characters
+            const hasU2028 = html.indexOf('\u2028') !== -1 || html.indexOf('\u2029') !== -1;
+            const controlMatches = html.match(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g);
+            console.log('[QueryHistoryView] Unicode/control diagnostics: hasU2028:', hasU2028, 'controlMatchesCount:', controlMatches ? controlMatches.length : 0);
+
+        } catch (e) {
+            console.error('[QueryHistoryView] Failed to log HTML preview', e);
+        }
+
+        // Handle webview disposal
+        webviewView.onDidDispose(() => {
+            console.log('[QueryHistoryView] Webview disposed');
+            this._view = undefined;
+        });
+
+        // When visibility changes (e.g., user opens the panel), refresh to ensure the webview has up-to-date data
+        if (typeof (webviewView as any).onDidChangeVisibility === 'function') {
+            (webviewView as any).onDidChangeVisibility(() => {
+                if (webviewView.visible) {
+                    console.log('[QueryHistoryView] View became visible, refreshing');
+                    this.refresh();
+                }
+            });
+        }
 
         // Handle messages from the webview
         webviewView.webview.onDidReceiveMessage(async (message) => {
@@ -39,9 +88,29 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                 case 'refresh':
                     this.refresh();
                     break;
+                case 'ready':
+                    // Webview signaled it's ready - try to let the extension refresh with active connection IDs.
+                    // If that command is not available for any reason, also perform a basic refresh so the
+                    // webview will at least receive the history entries.
+                    try {
+                        await vscode.commands.executeCommand('postgres-editor.refreshQueryHistory');
+                    } catch (e) {
+                        console.log('[QueryHistoryView] Failed to request refresh from extension:', e);
+                        // Fallback: send a basic refresh without connection annotations
+                        this.refresh();
+                    }
+                    // Also do a non-blocking refresh as a safety net in case the command did not result in
+                    // a posted message to the webview (some environments may not have the command bound yet).
+                    // This ensures the panel will show entries even if the extension-side command failed.
+                    this.refresh();
+                    break;
                 case 'copy':
                     await vscode.env.clipboard.writeText(message.query);
                     vscode.window.showInformationMessage('Query copied to clipboard');
+                    break;
+                case 'webviewError':
+                    // Webview reported an error while rendering or running its script. Surface it in extension host logs.
+                    console.error('[QueryHistoryView] Webview error:', message.error, message.stack || '');
                     break;
                 case 'clear':
                     await this.clearHistory();
@@ -50,21 +119,30 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                     await this.queryHistory.deleteEntry(message.id);
                     this.refresh();
                     break;
+                case 'openInEditor':
+                    await this.openQueryInEditor(message.entry);
+                    break;
+                case 'historyLoaded':
+                    console.log('[QueryHistoryView] Webview ACK - loaded history', message.count, 'entries, pingId:', message.pingId);
+                    if (message.pingId && this._pendingPings.has(message.pingId)) {
+                        this._pendingPings.delete(message.pingId);
+                    }
+                    break;
             }
         });
 
-        // Initial load
-        this.refresh();
+        // Don't call refresh here - let the webview signal when it's ready
+        // via the 'ready' message after its JavaScript has loaded
     }
 
     public refresh(): void {
         if (this._view) {
             const entries = this.queryHistory.getRecent(100);
-            this._view.webview.postMessage({
-                command: 'loadHistory',
-                entries: entries,
-                activeConnectionIds: []
-            });
+            console.log(`[QueryHistoryView] Refreshing with ${entries.length} entries`);
+            const payload = { command: 'loadHistory', entries: entries, activeConnectionIds: [], pingId: Date.now() };
+            this._sendWithAck(payload);
+        } else {
+            console.log('[QueryHistoryView] Refresh called but view not initialized');
         }
     }
 
@@ -74,12 +152,51 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
     public refreshWithConnections(activeConnectionIds: string[]): void {
         if (this._view) {
             const entries = this.queryHistory.getRecent(100);
-            this._view.webview.postMessage({
-                command: 'loadHistory',
-                entries: entries,
-                activeConnectionIds: activeConnectionIds
-            });
+            console.log(`[QueryHistoryView] Refreshing with ${entries.length} entries and ${activeConnectionIds.length} active connections`);
+            const payload = { command: 'loadHistory', entries: entries, activeConnectionIds: activeConnectionIds, pingId: Date.now() };
+            this._sendWithAck(payload);
+        } else {
+            console.log('[QueryHistoryView] RefreshWithConnections called but view not initialized');
         }
+    }
+
+    /**
+     * Send a payload and wait for 'historyLoaded' ack. Retries a few times if no ack.
+     */
+    private _sendWithAck(payload: any) {
+        if (!this._view) {
+            console.log('[QueryHistoryView] Cannot send payload, view not initialized');
+            return;
+        }
+
+        const pingId = payload.pingId;
+        this._pendingPings.add(pingId);
+        this._pingRetries.set(pingId, 0);
+
+        const trySend = () => {
+            if (!this._view) return;
+            const result = this._view!.webview.postMessage(payload);
+            console.log('[QueryHistoryView] postMessage result:', result, 'pingId:', pingId, 'retry:', this._pingRetries.get(pingId));
+
+            // set timeout to check ack
+            setTimeout(() => {
+                if (!this._pendingPings.has(pingId)) return; // ack received
+
+                const retries = (this._pingRetries.get(pingId) || 0) + 1;
+                if (retries > this.MAX_PING_RETRIES) {
+                    console.warn(`[QueryHistoryView] No ack received from webview for pingId ${pingId} after ${retries} retries`);
+                    this._pendingPings.delete(pingId);
+                    this._pingRetries.delete(pingId);
+                    return;
+                }
+
+                this._pingRetries.set(pingId, retries);
+                console.log(`[QueryHistoryView] Retrying loadHistory (pingId ${pingId}), attempt ${retries}`);
+                trySend();
+            }, 500);
+        };
+
+        trySend();
     }
 
     private async clearHistory(): Promise<void> {
@@ -94,6 +211,26 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
             this.refresh();
             vscode.window.showInformationMessage('Query history cleared');
         }
+    }
+
+    private async openQueryInEditor(entry: QueryHistoryEntry): Promise<void> {
+        const { parseSelectQuery } = await import('./queryParser');
+        const parsed = parseSelectQuery(entry.query);
+        
+        if (!parsed.isSupported || !parsed.table) {
+            vscode.window.showWarningMessage(`Cannot open this query in editor: ${parsed.reason || 'Unsupported query format'}`);
+            return;
+        }
+
+        // Use default schema 'public' if not specified
+        const schema = parsed.schema || 'public';
+        
+        await vscode.commands.executeCommand('postgres-editor.openTableWithWhere', {
+            connectionId: entry.connectionId,
+            schemaName: schema,
+            tableName: parsed.table,
+            whereClause: parsed.whereClause || ''
+        });
     }
 
     private getHtmlContent(webview: vscode.Webview): string {
@@ -219,8 +356,8 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
     <div class="toolbar">
         <h3>Query History</h3>
         <div class="toolbar-buttons">
-            <button onclick="refresh()" title="Refresh">🔄 Refresh</button>
-            <button class="secondary" onclick="clearAll()" title="Clear All">🗑️ Clear</button>
+            <button id="refreshBtn" title="Refresh">🔄 Refresh</button>
+            <button id="clearBtn" class="secondary" title="Clear All">🗑️ Clear</button>
         </div>
     </div>
     <div id="historyList" class="history-list">
@@ -232,6 +369,17 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
+        console.log('[QueryHistoryView Webview] script loaded');
+        window.addEventListener('error', (ev) => {
+            try {
+                const err = ev.error || ev;
+                console.error('[QueryHistoryView Webview] Uncaught error', err);
+                vscode.postMessage({ command: 'webviewError', error: String(err && err.message ? err.message : err), stack: err && err.stack ? err.stack : undefined });
+            } catch (e) {
+                console.error('[QueryHistoryView Webview] Error reporting failed', e);
+            }
+        });
+
         let entries = [];
 
         function refresh() {
@@ -240,6 +388,11 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
 
         function clearAll() {
             vscode.postMessage({ command: 'clear' });
+        }
+
+        // Notify extension that the webview is ready to receive messages
+        function ready() {
+            vscode.postMessage({ command: 'ready' });
         }
 
         function copyQuery(query) {
@@ -268,29 +421,42 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
             const hours = Math.floor(minutes / 60);
             const days = Math.floor(hours / 24);
 
-            if (days > 0) return \`\${days} day\${days > 1 ? 's' : ''} ago\`;
-            if (hours > 0) return \`\${hours} hour\${hours > 1 ? 's' : ''} ago\`;
-            if (minutes > 0) return \`\${minutes} minute\${minutes > 1 ? 's' : ''} ago\`;
+            if (days > 0) return days + ' day' + (days > 1 ? 's' : '') + ' ago';
+            if (hours > 0) return hours + ' hour' + (hours > 1 ? 's' : '') + ' ago';
+            if (minutes > 0) return minutes + ' minute' + (minutes > 1 ? 's' : '') + ' ago';
             return 'Just now';
         }
 
-        function renderHistory(historyEntries) {
+        function canOpenInEditor(query) {
+            // Simple check for SELECT queries without JOINs, subqueries, etc.
+            const trimmed = query.trim();
+            if (!/^SELECT\\s+/i.test(trimmed)) return false;
+            if (/\\bJOIN\\b|\\bUNION\\b|\\bWITH\\b|\\(SELECT\\b/i.test(trimmed)) return false;
+            if (!/\\bFROM\\s+/i.test(trimmed)) return false;
+            return true;
+        }
+
+        function openInEditor(entry) {
+            vscode.postMessage({ command: 'openInEditor', entry });
+        }
+
+        function renderHistory(historyEntries) { try {
+            console.log('[QueryHistoryView Webview] Rendering', historyEntries ? historyEntries.length : 0, 'entries');
             entries = historyEntries;
             const container = document.getElementById('historyList');
             
             if (!historyEntries || historyEntries.length === 0) {
-                container.innerHTML = \`
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📜</div>
-                        <div>No query history yet</div>
-                    </div>
-                \`;
+                container.innerHTML = '<div class="empty-state">' +
+                    '<div class="empty-state-icon">📜</div>' +
+                    '<div>No query history yet</div>' +
+                    '</div>';
                 return;
             }
 
             container.innerHTML = historyEntries.map((entry, index) => {
                 const escapedQuery = escapeHtml(entry.query);
                 const deletedNote = (activeConnectionIds && activeConnectionIds.indexOf(entry.connectionId) === -1) ? ' (deleted)' : '';
+                const canOpen = canOpenInEditor(entry.query);
                 let s = '';
                 s += '                <div class="history-entry" data-entry-index="' + index + '" data-entry-id="' + entry.id + '">\n';
                 s += '                    <div class="entry-header">\n';
@@ -303,18 +469,38 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                 s += '                    </div>\n';
                 s += '                    <div class="entry-query" data-entry-id="' + entry.id + '">' + escapedQuery + '</div>\n';
                 s += '                    <div class="entry-actions">\n';
+                if (canOpen) {
+                    s += '                        <button class="open-editor-btn" data-entry-index="' + index + '" title="Open in Table Editor">📊 Open in Editor</button>\n';
+                }
                 s += '                        <button class="copy-btn" data-entry-id="' + entry.id + '">📋 Copy</button>\n';
                 s += '                        <button class="delete-btn secondary" data-entry-id="' + entry.id + '">🗑️ Delete</button>\n';
                 s += '                    </div>\n';
                 s += '                </div>\n';
                 return s;
             }).join('');
+            } catch (e) {
+                console.error('[QueryHistoryView Webview] renderHistory error', e);
+                try { vscode.postMessage({ command: 'webviewError', error: String(e && e.message ? e.message : e), stack: e && e.stack ? e.stack : undefined }); } catch (er) { console.error('[QueryHistoryView Webview] Failed to report render error', er); }
+                const container = document.getElementById('historyList');
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">❌</div><div>Error rendering history</div></div>';
+                return;
+            }
         }
 
-// Delegate clicks for copy/delete (single handler)
+// Delegate clicks for copy/delete/open (single handler)
         document.addEventListener('click', (e) => {
             const target = e.target;
             if (!(target instanceof HTMLElement)) return;
+
+            // Open in Editor
+            const openBtn = target.closest('.open-editor-btn');
+            if (openBtn) {
+                const idx = parseInt(openBtn.getAttribute('data-entry-index') || '-1', 10);
+                if (idx >= 0 && idx < entries.length) {
+                    openInEditor(entries[idx]);
+                }
+                return;
+            }
 
             // Copy
             const copyBtn = target.closest('.copy-btn');
@@ -334,21 +520,31 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
             }
         });
 
+        // Hook up toolbar buttons without inline handlers (CSP-friendly)
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+        const clearBtn = document.getElementById('clearBtn');
+        if (clearBtn) clearBtn.addEventListener('click', clearAll);
+
         // Listen for messages from the extension
         let activeConnectionIds = [];
 
         window.addEventListener('message', event => {
             const message = event.data;
+            console.log('[QueryHistoryView Webview] Received message:', message.command, message);
             switch (message.command) {
                 case 'loadHistory':
                     activeConnectionIds = message.activeConnectionIds || [];
                     renderHistory(message.entries);
+                    try { vscode.postMessage({ command: 'historyLoaded', pingId: message.pingId, count: message.entries ? message.entries.length : 0 }); } catch (e) { console.error('[QueryHistoryView Webview] Failed to ack loadHistory', e); }
                     break;
             }
         });
 
         // Initial refresh
         refresh();
+        // Also announce readiness so extension can push active connection annotations
+        ready();
     </script>
 </body>
 </html>`;

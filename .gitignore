@@ -6,6 +6,7 @@ webview/.svelte-kit/
 
 # TypeScript build output
 out/
+dist/
 *.js.map
 *.vsix
 

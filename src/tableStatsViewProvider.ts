@@ -256,9 +256,9 @@ export class TableStatsViewProvider {
     <h1>Table Statistics: ${schemaName}.${tableName}</h1>
     
     <div class="toolbar">
-        <button onclick="refresh()">Refresh</button>
-        <button onclick="runVacuum()">Run VACUUM</button>
-        <button onclick="runAnalyze()">Run ANALYZE</button>
+        <button id="refreshBtn">Refresh</button>
+        <button id="vacuumBtn">Run VACUUM</button>
+        <button id="analyzeBtn">Run ANALYZE</button>
     </div>
 
     <div id="content">
@@ -279,6 +279,14 @@ export class TableStatsViewProvider {
         function runAnalyze() {
             vscode.postMessage({ command: 'runAnalyze' });
         }
+
+        // Hook up toolbar buttons without inline handlers
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+        const vacuumBtn = document.getElementById('vacuumBtn');
+        if (vacuumBtn) vacuumBtn.addEventListener('click', runVacuum);
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        if (analyzeBtn) analyzeBtn.addEventListener('click', runAnalyze);
 
         function formatSize(bytes) {
             const units = ['B', 'KB', 'MB', 'GB', 'TB'];

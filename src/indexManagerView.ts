@@ -179,8 +179,8 @@ export class IndexManagerView {
                 <td>${idx.isPrimary ? 'Yes' : 'No'}</td>
                 <td>${this.formatBytes(idx.sizeBytes)}</td>
                 <td>
-                    <button onclick="reindex('${idx.name}')">Reindex</button>
-                    ${!idx.isPrimary ? `<button onclick="dropIndex('${idx.name}')">Drop</button>` : ''}
+                    <button class="reindex-btn" data-index="${idx.name}">Reindex</button>
+                    ${!idx.isPrimary ? `<button class="drop-btn" data-index="${idx.name}">Drop</button>` : ''}
                 </td>
             </tr>
         `).join('');
@@ -232,8 +232,8 @@ export class IndexManagerView {
     <h1>Indexes - ${schemaName}.${tableName}</h1>
     
     <div class="toolbar">
-        <button onclick="createIndex()">Create Index</button>
-        <button onclick="refresh()">Refresh</button>
+        <button id="createIndexBtn">Create Index</button>
+        <button id="refreshBtn">Refresh</button>
     </div>
 
     <table>
@@ -271,6 +271,29 @@ export class IndexManagerView {
         function refresh() {
             vscode.postMessage({ command: 'refresh' });
         }
+
+        // Hook up toolbar buttons and delegate row actions
+        const createIndexBtn = document.getElementById('createIndexBtn');
+        if (createIndexBtn) createIndexBtn.addEventListener('click', createIndex);
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            if (!(target instanceof HTMLElement)) return;
+            const reindexBtn = target.closest('.reindex-btn');
+            if (reindexBtn) {
+                const name = reindexBtn.getAttribute('data-index');
+                if (name) reindex(name);
+                return;
+            }
+            const dropBtn = target.closest('.drop-btn');
+            if (dropBtn) {
+                const name = dropBtn.getAttribute('data-index');
+                if (name) dropIndex(name);
+                return;
+            }
+        });
 
         window.addEventListener('message', event => {
             const message = event.data;

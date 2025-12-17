@@ -40,6 +40,7 @@ export interface TableStatePayload {
   sort?: SortDescriptor | null;
   filters?: Record<string, string>;
   searchTerm?: string;
+  customWhereClause?: string;
   // Optional preferences persisted by the extension (per table)
   tablePreferences?: {
     columnOrder?: string[];

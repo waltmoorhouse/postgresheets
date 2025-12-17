@@ -259,6 +259,33 @@
   min-width: 220px;
 }
 
+.toolbar-where {
+  flex: 1;
+  min-width: 400px;
+  display: flex;
+  align-items: center;
+  gap: var(--ps-spacing-sm);
+}
+
+.where-label {
+  font-weight: 500;
+  color: var(--ps-text-primary);
+  white-space: nowrap;
+}
+
+.toolbar-where input[type='text'] {
+  flex: 1;
+  min-width: 200px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.9em;
+}
+
+.where-error {
+  color: var(--ps-error);
+  font-size: 0.85rem;
+  padding: 0 var(--ps-spacing-xs);
+}
+
 input[type='search'],
 input[type='text'] {
   border-radius: var(--ps-radius-sm);

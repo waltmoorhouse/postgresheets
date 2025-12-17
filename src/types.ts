@@ -83,6 +83,7 @@ export interface TableStatePayload {
     sort: SortDescriptor | null;
     filters: FilterMap;
     searchTerm: string;
+    customWhereClause?: string;
     tablePreferences?: TablePreferences;
 }
 
@@ -115,6 +116,8 @@ export type WebviewToExtensionMessage =
     | { command: 'search'; term: string }
     | { command: 'applySort'; sort: SortDescriptor | null }
     | { command: 'applyFilters'; filters: FilterMap }
+    | { command: 'applyCustomWhere'; whereClause: string }
+    | { command: 'convertFiltersToWhere' }
     | { command: 'refresh' }
     | { command: 'saveTablePreferences'; prefs: TablePreferences }
     | { command: 'resetTablePreferences' }
@@ -134,7 +137,8 @@ export type ExtensionToWebviewMessage =
     | { command: 'showMessage'; text: string }
     | { command: 'showError'; error: ErrorInfo }
     | { command: 'webviewError'; error: ErrorInfo }
-    | { command: 'foreignKeyRows'; rows: RowData[]; pkColumn: string };
+    | { command: 'foreignKeyRows'; rows: RowData[]; pkColumn: string }
+    | { command: 'loadData'; payload: TableStatePayload };
 
 /**
  * Union type for all possible webview messages
@@ -152,6 +156,8 @@ export function isWebviewToExtension(msg: any): msg is WebviewToExtensionMessage
         msg.command === 'search' ||
         msg.command === 'applySort' ||
         msg.command === 'applyFilters' ||
+        msg.command === 'applyCustomWhere' ||
+        msg.command === 'convertFiltersToWhere' ||
         msg.command === 'refresh' ||
         msg.command === 'saveTablePreferences' ||
         msg.command === 'resetTablePreferences' ||
@@ -173,7 +179,8 @@ export function isExtensionToWebview(msg: any): msg is ExtensionToWebviewMessage
         msg.command === 'showMessage' ||
         msg.command === 'showError' ||
         msg.command === 'webviewError' ||
-        msg.command === 'foreignKeyRows'
+        msg.command === 'foreignKeyRows' ||
+        msg.command === 'loadData'
     );
 }
 
