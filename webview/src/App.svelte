@@ -20,6 +20,7 @@
   export let vscode: VSCodeApi | undefined;
   export let initialState: unknown;
 
+
   interface RowState {
     id: number;
     original: Record<string, unknown>;
