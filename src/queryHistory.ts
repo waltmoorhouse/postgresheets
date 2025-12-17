@@ -36,7 +36,9 @@ export class QueryHistory {
         try {
             const stored = this.context.globalState.get<QueryHistoryEntry[]>(QueryHistory.STORAGE_KEY, []);
             this.history = stored.sort((a, b) => b.timestamp - a.timestamp);
+            console.log(`[QueryHistory] Loaded ${this.history.length} entries from storage`);
         } catch (error) {
+            console.log('[QueryHistory] Failed to load history:', error);
             this.history = [];
         }
     }
@@ -92,6 +94,7 @@ export class QueryHistory {
         }
 
         await this.saveHistory();
+        console.log(`[QueryHistory] Added query. Total entries: ${this.history.length}`);
     }
 
     /**

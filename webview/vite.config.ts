@@ -22,7 +22,8 @@ export default defineConfig({
         'create-table/main': path.resolve(__dirname, './src/create-table/main.ts'),
         'drop-table/main': path.resolve(__dirname, './src/drop-table/main.ts'),
         'add-connection/main': path.resolve(__dirname, './src/add-connection/main.ts'),
-        'csv-import/main': path.resolve(__dirname, './src/csv-import/main.ts')
+        'csv-import/main': path.resolve(__dirname, './src/csv-import/main.ts'),
+        'query-history/main': path.resolve(__dirname, './src/query-history/main.ts')
       },
       output: {
         entryFileNames: '[name].js',

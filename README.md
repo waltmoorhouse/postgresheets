@@ -2,10 +2,9 @@
 
 [![Build](https://github.com/waltmoorhouse/postgresheets/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/build.yml)
 [![Tests](https://github.com/waltmoorhouse/postgresheets/actions/workflows/component-tests.yml/badge.svg?branch=main)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/component-tests.yml)
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/waltmoorhouse/postgresheets/releases)
+[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/waltmoorhouse/postgresheets/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.md)
 [![Publish](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml/badge.svg?branch=release)](https://github.com/waltmoorhouse/postgresheets/actions/workflows/publish-on-merge.yml)
-[![Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/WaltMoorhouse.postgresheets?label=marketplace%20version)](https://marketplace.visualstudio.com/items?itemName=WaltMoorhouse.postgresheets)
 
 A VSCode extension that lets you connect to PostgreSQL databases and edit table data in a spreadsheet-like interface.
 
@@ -173,6 +172,22 @@ However, when using code created with GenAI (or really when installing any VSCod
 ### Query History
 
 The extension automatically tracks executed queries for easy reference and reuse:
+
+### SQL Terminal (Integrated)
+
+A lightweight SQL terminal is available via Command Palette ("PostgreSQL: Open SQL Terminal"). It provides a connection-aware prompt and supports rich line editing similar to bash/zsh:
+
+- Cursor movement: Left/Right arrows
+- History navigation: Up/Down to cycle previous queries (preserves current partial input)
+- Word navigation: Alt+Left / Alt+Right (and Alt+B / Alt+F alternates)
+- Jump to start/end: Ctrl+A / Ctrl+E
+- Backspace/Delete and Ctrl+C to cancel
+- Very large SQL strings produce a warning before execution
+
+See `docs/KEYBOARD_SHORTCUTS.md` for a complete list of supported keys and behaviors.
+
+The Query History view has also been improved: Copy and Delete buttons now work correctly and the view annotates entries whose connection has been removed.
+
 
 1. **View Query History:**
    - Use Command Palette: `PostgreSQL: Show Query History`
@@ -361,15 +376,8 @@ npm run watch
 npm run test
 ```
 
-### Publishing
-
-To publish to the VSCode Marketplace:
-
-1. Update `publisher` field in package.json
-2. Create a Personal Access Token from Azure DevOps
-3. Install vsce: `npm install -g @vscode/vsce`
-4. Package: `vsce package`
-5. Publish: `vsce publish`
+## Note
+For some reason, installing by right clicking on the VSIX file is failing, you should install a locally built version using the command line `code --install-extension postgresheers-${VERSION}.vsix` which works fine.
 
 ## Security
 

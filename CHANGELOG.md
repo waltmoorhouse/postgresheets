@@ -2,8 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2025-12-17
+
+### Added
+- @vercel/ncc bundling of extension
+- **Custom WHERE Clause Filtering**: Data Editor now supports custom SQL WHERE clauses for advanced table filtering
+  - Add custom WHERE clause input field in the toolbar (e.g., `id < 1000 AND name != 'Admin'`)
+  - WHERE clause combines with existing column filters and search using AND logic
+  - "Convert Filters" button generates SQL conditions from active column filters, then clears the filters
+  - Allows users to test filters visually, then convert to SQL for more complex queries
+  - WHERE clause persists when navigating between pages
+  - Pagination, sorting, and editing all work seamlessly with custom WHERE clauses
+- **Query History "Open in Editor"**: Simple SELECT queries can now be opened directly in the Data Editor
+  - "Open in Editor" button appears for compatible SELECT queries (single-table, no JOINs/subqueries)
+  - Automatically extracts table name and WHERE clause from query
+  - Opens the table in Data Editor with WHERE clause prefilled
+  - Provides seamless workflow from query execution to visual data exploration
+- **SQL Terminal: Advanced Line Editing**: The SQL terminal now supports Bash/Zsh-like line editing with cursor movement, word navigation, and common shortcuts (Ctrl+A/Ctrl+E, Alt+Left/Alt+Right). Editing preserves the current partial command when navigating history.
+
+### Changed
+- **Query History View**: Fixed Copy and Delete actions in the Query History webview using safe escaping and event delegation; the view now annotates entries whose connection has been removed and auto-refreshes when new queries are executed.
+- **Query History Webview (Svelte)**: Migrated the Query History webview to a Svelte bundle loaded via `webview.asWebviewUri`, added a robust ping/ack handshake and a lightweight fallback renderer for resilience against host-side inline HTML/JS corruption; added unit tests for the handshake and loader behavior.
+- **Query History UI**: "Open" now uses `ps-btn--primary` (solid blue); Delete/Clear/Delete Selected now use `ps-btn--danger` (solid red) with a subtle red hover glow and accessible focus outlines.
+- **Global Styling**: Added box-shadow transitions and blue hover glow for primary buttons; strengthened `.ps-btn--danger` selectors and added `.drop-btn` rules so static HTML-based views (Index Manager, Drop Table) reliably show danger styling.
+- **Schema Designer**: Drop action now applies danger styling when performing a destructive Drop ("Remove" for new objects remains a ghost button).
+- **Large Query Handling**: Terminal warns when executing very large SQL strings and protects the input buffer with a configurable max line length.
+- **Fallback Mode**: If advanced line editing fails, the terminal falls back to a simple input mode to avoid blocking the user.
+- **Query History UI**: Moved the Query History view from the Explorer panel to the **PostgreSQL Editor** side panel. The activity bar now reads **PostgreSQL Editor** and contains a **Connections** section at the top and **Query History** at the bottom.
+
+### Technical Details
+- New message types: `applyCustomWhere` and `convertFiltersToWhere`
+- Query parser utility (`queryParser.ts`) for SELECT statement analysis
+- Enhanced `DataEditor.openTable()` to accept optional WHERE clause parameter
+- New command: `postgres-editor.openTableWithWhere` for programmatic table opening with filters
+
 ## [3.2.1] - 2025-11-06
 
+### Changed
 - Documentation update
 
 ## [3.2.0] - 2025-11-06
@@ -171,6 +206,7 @@ All notable changes to this project will be documented in this file.
 	- Small component source fixes so the components compile under the test transform (removed inline `as` TypeScript casts in event attributes which confused the Svelte parser in tests).
 	- Added `test:prepare-webview` and `test:components:ci` npm scripts and updated CI workflow to install webview dev dependencies before running component tests.
 	- Added `tsconfig.test.json` and ambient test types so jest-dom matchers are available to TypeScript in tests; re-enabled unguarded jest-dom assertions.
+- Rebuilt webview assets after Svelte migration and added unit/integration tests for the Query History loader, handshake, and UI button styling; full test suite passing locally (34 test suites, 234 tests, 2 skipped at time of release).
 
 Files changed (high level): `jest.config.cjs`, `test/jest.setup.js`, `tsconfig.test.json`, `test/test-ambient.d.ts`, `package.json` (scripts + devDeps), `.github/workflows/component-tests.yml`, `webview/svelte.config.js`, `webview/tsconfig.json`, and small Svelte source edits for component tests.
 
@@ -187,5 +223,28 @@ Files changed (high level): `jest.config.cjs`, `test/jest.setup.js`, `tsconfig.t
 ## [1.0.27] - 2025-10-12
 - Phase 6 testing completion
 
-## [1.0.26] - previous
+## [1.0.26]
 - Phase 5 completion (graphical workflows)
+
+## [1.0.27]
+- Phase 6 testing completion
+- Comprehensive test suite
+- Known issues documented
+
+## [1.0.26]
+- Phase 5 complete (graphical workflows)
+- Create Table Wizard
+- Drop Table Wizard
+- Schema Designer
+
+## [1.0.20-1.0.25]
+- Phase 4 (Schema Designer)
+- Phase 3 (Visual refinement)
+- Phase 2 (Enhanced grid)
+- Phase 1 (Svelte migration)
+
+## [1.0.0-1.0.19]
+- Initial release
+- Basic CRUD operations
+- Tree view provider
+- HTML-based webviews (pre-Svelte)

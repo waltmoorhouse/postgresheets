@@ -5,9 +5,20 @@ docs/**
 test/**
 webview/**
 src/**
+node_modules/**
+coverage/**
+.cache/**
+.DS_Store
+.env*
 **/*.tsbuildinfo
 **/*.map
 npm-debug.log*
 tsconfig.json
 tsconfig.*.json
 jest.config.js
+
+# Note: Keep bundled outputs (dist/, media/, images/) and package.json so the extension remains functional. 
+# If you bundle webview assets into a different folder (e.g. webview/dist), be sure to include that output in media/ or adjust these rules accordingly.
+
+# Exclude TypeScript compiled files from packaging; we publish the NCC bundle in dist
+out/**

@@ -44,13 +44,13 @@ export function activate(context: vscode.ExtensionContext) {
         void vscode.commands.executeCommand('setContext', 'postgresHasConnecting', connectingSet.size > 0);
     });
     const treeProvider = new DatabaseTreeProvider(connectionManager);
-    const dataEditor = new DataEditor(context, connectionManager);
     const schemaDesigner = new SchemaDesigner(context, connectionManager);
     const createTableWizard = new CreateTableWizard(context, connectionManager, () => treeProvider.refresh());
     const dropTableWizard = new DropTableWizard(context, connectionManager, () => treeProvider.refresh());
     const addConnectionWizard = new (require('./addConnectionWizard').AddConnectionWizard)(context, connectionManager, () => treeProvider.refresh());
     const queryHistory = new QueryHistory(context);
     const queryHistoryView = new QueryHistoryView(context, queryHistory);
+    const dataEditor = new DataEditor(context, connectionManager, queryHistory);
     const sqlTerminalProvider = new SqlTerminalProvider(context, connectionManager, queryHistory);
     const indexManagerView = new IndexManagerView(context, connectionManager);
     const permissionsManagerView = new PermissionsManagerView(context, connectionManager);
@@ -317,6 +317,23 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
+        vscode.commands.registerCommand('postgres-editor.openTableWithWhere', async (args: { 
+            connectionId: string; 
+            schemaName: string; 
+            tableName: string; 
+            whereClause?: string;
+        }) => {
+            // Create a mock DatabaseTreeItem for the dataEditor
+            const mockItem: Partial<DatabaseTreeItem> & { connectionId: string; schemaName: string; tableName: string; type: string } = {
+                connectionId: args.connectionId,
+                schemaName: args.schemaName,
+                tableName: args.tableName,
+                type: 'table',
+                label: `${args.schemaName}.${args.tableName}`
+            };
+            await dataEditor.openTable(mockItem as DatabaseTreeItem, args.whereClause || '');
+        }),
+
         vscode.commands.registerCommand('postgres-editor.createTable', async (item?: DatabaseTreeItem) => {
             await createTableWizard.openWizard(item);
         }),
@@ -420,20 +437,22 @@ export function activate(context: vscode.ExtensionContext) {
         }),
 
         vscode.commands.registerCommand('postgres-editor.clearQueryHistory', async () => {
-            // The query history view already has a confirmation dialog, 
-            // so we just trigger it via a message
             const confirmed = await vscode.window.showWarningMessage(
                 'Clear all query history?',
                 { modal: true },
                 'Clear'
             );
             if (confirmed === 'Clear') {
-                await vscode.commands.executeCommand('postgres-editor.refreshQueryHistory');
+                await queryHistory.clearHistory();
+                queryHistoryView.refresh();
+                vscode.window.showInformationMessage('Query history cleared');
             }
         }),
 
-        vscode.commands.registerCommand('postgres-editor.refreshQueryHistory', () => {
-            queryHistoryView.refresh();
+        vscode.commands.registerCommand('postgres-editor.refreshQueryHistory', async () => {
+            const configs = await connectionManager.getConnections();
+            const ids = configs.map(c => c.id);
+            queryHistoryView.refreshWithConnections(ids);
         }),
 
         vscode.commands.registerCommand('postgres-editor.openSqlTerminal', async (item?: DatabaseTreeItem) => {

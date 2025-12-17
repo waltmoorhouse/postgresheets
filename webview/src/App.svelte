@@ -20,6 +20,7 @@
   export let vscode: VSCodeApi | undefined;
   export let initialState: unknown;
 
+
   interface RowState {
     id: number;
     original: Record<string, unknown>;
@@ -54,6 +55,8 @@
   let totalRows = 0;
   let paginationSize = 100;
   let searchTerm = '';
+  let customWhereClause = '';
+  let whereError = '';
   let sqlPreview = '';
   let sqlPreviewOpen = false;
   let sqlPreviewIsError = false;
@@ -233,6 +236,8 @@
     totalRows = payload.totalRows ?? rawRows.length;
     paginationSize = payload.paginationSize ?? 100;
     searchTerm = '';
+    customWhereClause = '';
+    whereError = '';
     sqlPreview = '';
     sqlPreviewOpen = false;
     previewLoading = false;
@@ -244,6 +249,8 @@
     activeSort = payload.sort ?? null;
     filters = { ...(payload.filters ?? {}) };
     searchTerm = payload.searchTerm ?? '';
+    customWhereClause = payload.customWhereClause ?? '';
+    whereError = '';
     const sanitizedColumnWidths: Record<string, number> = {};
     columns.forEach((column) => {
       const width = previousColumnWidths[column.name];
@@ -1162,11 +1169,13 @@
   function requestPreview(): void {
     const changes = gatherChanges();
     // Client-side validation: block preview when validation errors exist (unless bypassed).
-    const errors = rows.flatMap((r) =>
-      Object.entries(r.validation ?? {})
+    const errors = rows.reduce((acc: { rowId: number; column: string; error: string | null }[], r: RowState) => {
+      const rowErrors = Object.entries(r.validation ?? {})
         .filter(([, v]) => v)
-        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
-    );
+        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }));
+      return acc.concat(rowErrors);
+    }, []);
+
     if (errors.length > 0 && !bypassValidation) {
       executionError = 'Fix validation errors before generating SQL preview.';
       sqlPreviewOpen = true;
@@ -1234,11 +1243,12 @@
   function requestExecution(): void {
     const changes = gatherChanges();
     // Block execution while there are client-side validation errors (unless bypassed)
-    const errors = rows.flatMap((r) =>
-      Object.entries(r.validation ?? {})
+    const errors = rows.reduce((acc: { rowId: number; column: string; error: string | null }[], r: RowState) => {
+      const rowErrors = Object.entries(r.validation ?? {})
         .filter(([, v]) => v)
-        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }))
-    );
+        .map(([k, v]) => ({ rowId: r.id, column: k, error: v }));
+      return acc.concat(rowErrors);
+    }, []);
     if (errors.length > 0 && !bypassValidation) {
       executionError = 'Fix validation errors before executing changes.';
       executionMessage = '';
@@ -1336,6 +1346,32 @@
     ariaLiveMessage = searchTerm?.trim() 
       ? `Searching for "${searchTerm.trim()}"`
       : 'Search cleared, showing all rows';
+  }
+
+  function applyCustomWhere(): void {
+    whereError = '';
+    ensureVscode().postMessage({ command: 'applyCustomWhere', whereClause: customWhereClause.trim() });
+    ariaLiveMessage = customWhereClause.trim() 
+      ? `Applied custom WHERE clause`
+      : 'WHERE clause cleared';
+  }
+
+  function convertFiltersToWhere(): void {
+    // Check if there are any active filters
+    const activeFilters = Object.entries(filters).filter(([_, value]) => value && value.trim());
+    if (activeFilters.length === 0) {
+      whereError = 'No active filters to convert';
+      return;
+    }
+    whereError = '';
+    ensureVscode().postMessage({ command: 'convertFiltersToWhere' });
+    ariaLiveMessage = 'Converted filters to WHERE clause';
+  }
+
+  function clearCustomWhere(): void {
+    customWhereClause = '';
+    whereError = '';
+    applyCustomWhere();
   }
 
   function resetPreferences(): void {
@@ -1477,7 +1513,7 @@
         <button type="button" class="ps-btn ps-btn--primary" on:click={addRow}>Add row</button>
         <button
           type="button"
-          class="ps-btn ps-btn--ghost"
+          class="ps-btn ps-btn--danger"
           on:click={deleteSelected}
           disabled={!rows.some((row) => row.selected)}
         >
@@ -1562,7 +1598,7 @@
           placeholder="Search this table…"
           bind:value={searchTerm}
           on:keydown={(event) => event.key === 'Enter' && executeSearch()}
-          on:search={() => {
+          on:input={(e) => {
             // Handle native browser clear button (X in search inputs)
             if (!searchTerm || searchTerm.trim().length === 0) {
               executeSearch();
@@ -1571,6 +1607,50 @@
         >
         <button type="button" class="ps-btn ps-btn--ghost" on:click={executeSearch}>Search</button>
       </div>
+      
+      <div class="toolbar-group toolbar-where">
+        <label for="where-input" class="where-label">WHERE:</label>
+        <input
+          id="where-input"
+          type="text"
+          placeholder="id < 1000 AND name != 'Admin'"
+          bind:value={customWhereClause}
+          on:keydown={(event) => event.key === 'Enter' && applyCustomWhere()}
+          aria-label="Custom WHERE clause"
+          aria-describedby={whereError ? 'where-error' : undefined}
+          aria-invalid={!!whereError}
+        >
+        <button 
+          type="button" 
+          class="ps-btn ps-btn--ghost" 
+          on:click={applyCustomWhere}
+          title="Apply WHERE clause"
+        >
+          Apply
+        </button>
+        <button 
+          type="button" 
+          class="ps-btn ps-btn--ghost" 
+          on:click={convertFiltersToWhere}
+          title="Convert active column filters to WHERE clause"
+          disabled={Object.values(filters).every(v => !v || !v.trim())}
+        >
+          Convert Filters
+        </button>
+        <button 
+          type="button" 
+          class="ps-btn ps-btn--ghost" 
+          on:click={clearCustomWhere}
+          title="Clear WHERE clause"
+          disabled={!customWhereClause.trim()}
+        >
+          Clear
+        </button>
+        {#if whereError}
+          <span id="where-error" class="where-error" role="alert">{whereError}</span>
+        {/if}
+      </div>
+
       <div class="toolbar-group pagination" role="navigation" aria-label="Pagination">
         <button
           type="button"

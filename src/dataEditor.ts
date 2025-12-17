@@ -26,6 +26,7 @@ interface PanelState {
     sort: SortDescriptor | null;
     filters: FilterMap;
     searchTerm: string;
+    customWhereClause: string;
 }
 
 interface CachedSchemaMetadata {
@@ -44,12 +45,17 @@ export class DataEditor {
     // Cache schema/enum metadata keyed by panel key (connection:schema.table)
     private schemaCache: Map<string, CachedSchemaMetadata> = new Map();
 
-    constructor(context: vscode.ExtensionContext, connectionManager: ConnectionManager) {
+    // Accept QueryHistory so we can record queries executed by the Data Editor
+    constructor(
+        context: vscode.ExtensionContext,
+        connectionManager: ConnectionManager,
+        private readonly queryHistory?: import('./queryHistory').QueryHistory
+    ) {
         this.context = context;
         this.connectionManager = connectionManager;
     }
 
-    async openTable(item: DatabaseTreeItem): Promise<void> {
+    async openTable(item: DatabaseTreeItem, initialWhereClause?: string): Promise<void> {
         const connectionId = item.connectionId;
         const schemaName = item.schemaName;
         const tableName = item.tableName;
@@ -64,6 +70,10 @@ export class DataEditor {
         if (existingPanel) {
             existingPanel.reveal(vscode.ViewColumn.One);
             const state = this.getPanelState(existingPanel);
+            // Update WHERE clause if provided
+            if (initialWhereClause !== undefined) {
+                state.customWhereClause = initialWhereClause;
+            }
             await this.loadTableData(existingPanel, connectionId, schemaName, tableName, state.page);
             return;
         }
@@ -80,7 +90,11 @@ export class DataEditor {
         );
 
         this.panels.set(panelKey, panel);
-        this.panelState.set(panel, this.createDefaultPanelState());
+        const defaultState = this.createDefaultPanelState();
+        if (initialWhereClause) {
+            defaultState.customWhereClause = initialWhereClause;
+        }
+        this.panelState.set(panel, defaultState);
 
         const messageDisposable = panel.webview.onDidReceiveMessage(async (message: WebviewToExtensionMessage | unknown) => {
             if (!isWebviewToExtension(message)) {
@@ -112,7 +126,8 @@ export class DataEditor {
             page: 0,
             sort: null,
             filters: {},
-            searchTerm: ''
+            searchTerm: '',
+            customWhereClause: ''
         };
     }
 
@@ -366,7 +381,7 @@ export class DataEditor {
             const offset = state.page * this.paginationSize;
             const qualifiedTable = `${this.quoteIdentifier(schemaName)}.${this.quoteIdentifier(tableName)}`;
 
-            const { whereClause, values } = this.buildWhereClause(columns, state.filters, state.searchTerm);
+            const { whereClause, values } = this.buildWhereClause(columns, state.filters, state.searchTerm, state.customWhereClause);
 
             const columnNames = new Set(columns.map(column => column.name));
             let sort = state.sort;
@@ -387,6 +402,27 @@ export class DataEditor {
             const dataQuery = `SELECT * FROM ${qualifiedTable}${clauseSql} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`;
             const dataValues = [...values, this.paginationSize, offset];
             const dataResult = await client.query(dataQuery, dataValues);
+
+            // Record the executed SELECT in Query History (if available)
+            try {
+                if (this.queryHistory) {
+                    const connections = await this.connectionManager.getConnections();
+                    const conn = connections.find(c => c.id === connectionId);
+                    const connectionName = conn ? conn.name : connectionId;
+                    const databaseName = conn ? conn.database : undefined;
+                    const formattedSql = SqlGenerator.formatSqlWithValues(dataQuery, dataValues);
+                    // Fire-and-forget; do not fail table load on history errors
+                    await this.queryHistory.addQuery(formattedSql, connectionId, connectionName, databaseName);
+                    // Notify any open Query History view to refresh connection annotations
+                    try {
+                        await vscode.commands.executeCommand('postgres-editor.refreshQueryHistory');
+                    } catch (e) {
+                        // ignore if command fails (e.g., in tests)
+                    }
+                }
+            } catch (e) {
+                // Swallow errors - history is best-effort
+            }
 
             // Normalize returned values for JSON, arrays and enums so the
             // webview receives JS-native types (objects/arrays) rather than
@@ -464,6 +500,7 @@ export class DataEditor {
                 sort: state.sort,
                 filters: state.filters,
                 searchTerm: state.searchTerm,
+                customWhereClause: state.customWhereClause,
                 tablePreferences: prefs
             };
         } catch (error) {
@@ -543,18 +580,40 @@ export class DataEditor {
                     await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
                     break;
                 }
-                case 'applyFilters': {
-                    const incoming = message.filters ?? {};
-                    const normalized: FilterMap = {};
-                    for (const [key, value] of Object.entries(incoming)) {
-                        if (typeof value === 'string') {
-                            normalized[key] = value;
-                        }
-                    }
+                case 'applyCustomWhere': {
+                    const whereClause = typeof message.whereClause === 'string' ? message.whereClause.trim() : '';
                     const state = this.getPanelState(panel);
-                    state.filters = normalized;
+                    state.customWhereClause = whereClause;
                     state.page = 0;
                     await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    break;
+                }
+                case 'convertFiltersToWhere': {
+                    const state = this.getPanelState(panel);
+                    // Convert current filters to WHERE clause
+                    const whereParts: string[] = [];
+                    for (const [columnName, filterValue] of Object.entries(state.filters ?? {})) {
+                        const value = typeof filterValue === 'string' ? filterValue.trim() : '';
+                        if (value) {
+                            // Escape single quotes in the value
+                            const escapedValue = value.replace(/'/g, "''");
+                            whereParts.push(`${this.quoteIdentifier(columnName)} ILIKE '%${escapedValue}%'`);
+                        }
+                    }
+                    
+                    if (whereParts.length > 0) {
+                        const newWhereClause = whereParts.join(' AND ');
+                        // Append to existing WHERE clause if present
+                        if (state.customWhereClause) {
+                            state.customWhereClause = `${state.customWhereClause} AND ${newWhereClause}`;
+                        } else {
+                            state.customWhereClause = newWhereClause;
+                        }
+                        // Clear the filters after conversion
+                        state.filters = {};
+                        state.page = 0;
+                        await this.loadTableData(panel, connectionId, schemaName, tableName, 0);
+                    }
                     break;
                 }
                 case 'refresh': {
@@ -803,7 +862,8 @@ export class DataEditor {
     private buildWhereClause(
         columns: ColumnInfo[],
         filters: FilterMap,
-        searchTerm: string
+        searchTerm: string,
+        customWhereClause: string = ''
     ): { whereClause: string; values: unknown[] } {
         const clauses: string[] = [];
         const values: unknown[] = [];
@@ -830,6 +890,16 @@ export class DataEditor {
             const columnClauses = columns.map(column => `CAST(${this.quoteIdentifier(column.name)} AS TEXT) ILIKE ${placeholder}`);
             clauses.push(`(${columnClauses.join(' OR ')})`);
             values.push(`%${searchValue}%`);
+        }
+
+        // Add custom WHERE clause if provided
+        const customWhere = typeof customWhereClause === 'string' ? customWhereClause.trim() : '';
+        if (customWhere) {
+            // Remove leading "WHERE" if user included it
+            const cleanedWhere = customWhere.replace(/^\s*WHERE\s+/i, '');
+            if (cleanedWhere) {
+                clauses.push(`(${cleanedWhere})`);
+            }
         }
 
         const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';

@@ -103,14 +103,15 @@ select {
   padding: calc(var(--ps-spacing-xs) + 2px) var(--ps-spacing-md);
   cursor: pointer;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
-    transform 160ms ease;
+    transform 160ms ease, box-shadow 160ms ease;
   min-height: 30px;
   text-decoration: none;
 }
 
 .ps-btn:hover:enabled {
   background: color-mix(in srgb, var(--ps-accent) 20%, var(--ps-surface-subtle));
-}
+  box-shadow: 0 8px 24px rgba(55,148,255,0.14), 0 0 12px rgba(55,148,255,0.12);
+} 
 
 .ps-btn:focus-visible {
   outline: 2px solid var(--ps-focus-ring);
@@ -164,14 +165,52 @@ select {
   padding: var(--ps-spacing-2xs);
 }
 
+/* Solid-danger styles — using two-class selectors to increase specificity
+   so these rules override generic .ps-btn:hover rules that may be emitted
+   in other compiled CSS files loaded after this one. */
+.ps-btn.ps-btn--danger {
+  /* Use the theme-provided error background for a solid-danger look */
+  background: var(--vscode-inputValidation-errorBackground, #b22222);
+  border-color: var(--ps-danger-border);
+  color: var(--ps-text-primary);
+}
+
+.ps-btn.ps-btn--danger:hover:enabled {
+  /* Slightly darker fill and a red hover glow */
+  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #b22222) 80%, transparent);
+  box-shadow: 0 8px 24px rgba(244, 67, 54, 0.18), 0 0 12px rgba(244, 67, 54, 0.14);
+}
+
+/* Extra specificity for designer and other contexts where generic hover may win. */
+.designer-container .ps-btn.ps-btn--danger,
+.drop-btn {
+  background: var(--vscode-inputValidation-errorBackground, #b22222);
+  border-color: var(--ps-danger-border);
+  color: var(--ps-text-primary);
+}
+
+.designer-container .ps-btn.ps-btn--danger:hover:enabled,
+.drop-btn:hover {
+  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #b22222) 80%, transparent);
+  box-shadow: 0 8px 24px rgba(244, 67, 54, 0.18), 0 0 12px rgba(244, 67, 54, 0.14);
+}
+
+/* Make drop buttons visually distinct on focus for accessibility */
+.designer-container .ps-btn.ps-btn--danger:focus-visible,
+.drop-btn:focus-visible {
+  outline: 2px solid rgba(244, 67, 54, 0.9);
+  outline-offset: 2px;
+}
+/* Keep the single-class rules for completeness and to cover direct references */
 .ps-btn--danger {
-  background: color-mix(in srgb, var(--ps-danger-bg) 42%, transparent);
+  background: var(--vscode-inputValidation-errorBackground, #b22222);
   border-color: var(--ps-danger-border);
   color: var(--ps-text-primary);
 }
 
 .ps-btn--danger:hover:enabled {
-  background: color-mix(in srgb, var(--ps-danger-bg) 65%, transparent);
+  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #b22222) 80%, transparent);
+  box-shadow: 0 8px 24px rgba(244, 67, 54, 0.18), 0 0 12px rgba(244, 67, 54, 0.14);
 }
 
 ::selection {

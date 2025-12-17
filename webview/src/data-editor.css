@@ -128,13 +128,14 @@
   padding: calc(var(--ps-spacing-xs) + 2px) var(--ps-spacing-md);
   cursor: pointer;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
-    transform 160ms ease;
+    transform 160ms ease, box-shadow 160ms ease;
   min-height: 30px;
   text-decoration: none;
 }
 
 .ps-btn:hover:enabled {
   background: color-mix(in srgb, var(--ps-accent) 20%, var(--ps-surface-subtle));
+  box-shadow: 0 8px 24px rgba(55,148,255,0.14), 0 0 12px rgba(55,148,255,0.12);
 }
 
 /* Column manager styles moved to ColumnManager.svelte */
@@ -257,6 +258,33 @@
 
 .toolbar-search input[type='search'] {
   min-width: 220px;
+}
+
+.toolbar-where {
+  flex: 1;
+  min-width: 400px;
+  display: flex;
+  align-items: center;
+  gap: var(--ps-spacing-sm);
+}
+
+.where-label {
+  font-weight: 500;
+  color: var(--ps-text-primary);
+  white-space: nowrap;
+}
+
+.toolbar-where input[type='text'] {
+  flex: 1;
+  min-width: 200px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.9em;
+}
+
+.where-error {
+  color: var(--ps-error);
+  font-size: 0.85rem;
+  padding: 0 var(--ps-spacing-xs);
 }
 
 input[type='search'],

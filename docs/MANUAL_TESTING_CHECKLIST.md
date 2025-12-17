@@ -397,13 +397,38 @@ _____________________________________________
 ☐ Statements use parameterized queries  
 ☐ Can copy SQL  
 
-### Save (Batch Mode)
-☐ Click "Save" button  
-☐ Confirmation message (optional)  
-☐ Changes execute in transaction  
-☐ Success message shown  
-☐ Data reloads  
-☐ Change count resets  
+---
+
+## SQL Terminal & Query History
+
+### SQL Terminal - Basic Editing
+☐ Open SQL Terminal via Command Palette (`PostgreSQL: Open SQL Terminal`)
+☐ Type `SELECT 1;` and press Enter — query executes and returns result
+☐ Use Left/Right arrows to move cursor and edit the line in-place
+☐ Use Ctrl+A and Ctrl+E to jump to the start and end of the line
+☐ Use Alt+Left / Alt+Right (or Alt+B / Alt+F) to move by words
+☐ Backspace and Delete behave correctly at and before cursor
+☐ Rapid key presses do not corrupt the buffer
+
+### SQL Terminal - History Navigation
+☐ Type a partial command (e.g., `SELECT * FROM`) then press Up — previous query appears
+☐ Press Up multiple times to cycle older queries
+☐ Press Down to move forward; at newest entry Down restores the partial command
+☐ Edit a historical command and press Enter; the edited command is added to history
+
+### SQL Terminal - Edge Cases
+☐ Paste or type a very large query (>10KB) — terminal shows a warning before execution
+☐ Execute a large query — terminal does not crash and results are limited in display (first 100 rows)
+☐ Delete a connection from Connections and open Query History — entries from deleted connections show `(deleted)` annotation
+
+### Query History View
+☐ Open Query History view
+☐ Copy button copies full query text (including newlines and quotes)
+☐ Delete button removes entry immediately and view refreshes
+☐ Refresh button reloads history; changes appear when new queries are executed
+
+**Notes:**
+- For performance reasons, consider using `LIMIT` when querying very large tables from the terminal to avoid large result sets.
 
 
 ### Save (Immediate Mode)
