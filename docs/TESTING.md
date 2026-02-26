@@ -153,6 +153,10 @@ Tests ALTER TABLE and CREATE TABLE generation.
 - ALTER COLUMN (TYPE, SET/DROP NOT NULL, SET/DROP DEFAULT)
 - RENAME COLUMN
 - Constraint operations (PK, FK, UNIQUE, CHECK)
+- Constraint-diff SQL generation for schema designer edits:
+  - non-unique indexes (`CREATE INDEX` / `DROP INDEX`)
+  - composite unique indexes and unique constraints
+  - foreign key add/drop/recreate with ON UPDATE / ON DELETE actions
 - DROP CONSTRAINT
 - Identifier quoting and escaping
 - CREATE TABLE statement generation

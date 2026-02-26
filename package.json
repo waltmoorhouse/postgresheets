@@ -128,6 +128,30 @@
         "category": "PostgreSQL"
       },
       {
+        "command": "postgres-editor.newSqlFile",
+        "title": "New SQL File",
+        "icon": "$(file)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.runSqlFile",
+        "title": "Run SQL File",
+        "icon": "$(play)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.runSqlSelection",
+        "title": "Run SQL Selection",
+        "icon": "$(play)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.selectSqlDocumentConnection",
+        "title": "Select SQL Connection",
+        "icon": "$(plug)",
+        "category": "PostgreSQL"
+      },
+      {
         "command": "postgres-editor.viewQueryHistory",
         "title": "View Query History",
         "icon": "$(history)",
@@ -208,6 +232,29 @@
         {
           "command": "postgres-editor.refreshQueryHistory",
           "when": "view == postgresQueryHistory",
+          "group": "navigation"
+        }
+      ],
+      "menubar/file": [
+        {
+          "command": "postgres-editor.newSqlFile",
+          "group": "2_new"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "postgres-editor.selectSqlDocumentConnection",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.runSqlSelection",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.runSqlFile",
+          "when": "resourceLangId == sql",
           "group": "navigation"
         }
       ],

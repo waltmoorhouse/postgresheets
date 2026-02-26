@@ -390,7 +390,6 @@ For some reason, installing by right clicking on the VSIX file is failing, you s
 
 - 100 row pagination (configurable in code)
 - Requires tables to have primary keys for updates/deletes
-- No support for altering table structure (columns, indexes, etc.)
 - No support for stored procedures or functions
 - Complex data types (arrays, custom types) shown as strings (arrays and enums have improved handling; enums show a select UI, arrays are normalized and editable via the JSON editor)
 

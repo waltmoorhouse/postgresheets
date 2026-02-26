@@ -10,6 +10,7 @@ import { CsvImportWizard } from './csvImportWizard';
 import { QueryHistory } from './queryHistory';
 import { QueryHistoryView } from './queryHistoryView';
 import { SqlTerminalProvider } from './sqlTerminalProvider';
+import { SqlEditor } from './sqlEditor';
 import { IndexManagerView } from './indexManagerView';
 import { PermissionsManagerView } from './permissionsManagerView';
 import { TableStatsViewProvider } from './tableStatsViewProvider';
@@ -52,6 +53,8 @@ export function activate(context: vscode.ExtensionContext) {
     const queryHistoryView = new QueryHistoryView(context, queryHistory);
     const dataEditor = new DataEditor(context, connectionManager, queryHistory);
     const sqlTerminalProvider = new SqlTerminalProvider(context, connectionManager, queryHistory);
+    // SQL Editor (CodeLens, completion, run-from-editor, per-doc connections)
+    const sqlEditor = new SqlEditor(context, connectionManager, sqlTerminalProvider, queryHistory);
     const indexManagerView = new IndexManagerView(context, connectionManager);
     const permissionsManagerView = new PermissionsManagerView(context, connectionManager);
     const tableStatsViewProvider = new TableStatsViewProvider(context, connectionManager);

@@ -32,7 +32,19 @@ export interface CreateTableBuildResult {
 export function buildCreateTableStatements(
     schema: string,
     table: string,
-    columns: CreateTableColumnDefinition[]
+    columns: CreateTableColumnDefinition[],
+    // constraints come from schema/create wizards; may be undefined or empty
+    constraints?: {
+        name: string;
+        type: 'index' | 'uniqueIndex' | 'foreignKey';
+        columns: string[];
+        referencedSchema?: string | null;
+        referencedTable?: string | null;
+        referencedColumns?: string[];
+        onUpdate?: string | null;
+        onDelete?: string | null;
+        method?: string | null;
+    }[]
 ): CreateTableBuildResult {
     if (!schema || !table) {
         throw new Error('Schema and table name are required');
@@ -97,6 +109,53 @@ export function buildCreateTableStatements(
     const statements = [`CREATE TABLE ${tableIdentifier} (${definitionFragments.join(', ')});`];
     if (comments.length > 0) {
         statements.push(...comments);
+    }
+
+    // add any additional constraint creation statements after the table creation
+    if (Array.isArray(constraints) && constraints.length > 0) {
+        for (const constraint of constraints) {
+            const cname = constraint.name.trim();
+            if (!cname) {
+                // skip invalid constraint
+                continue;
+            }
+            const columnList = (constraint.columns || []).map(col => quoteIdentifier(col)).join(', ');
+            if (!columnList) {
+                continue;
+            }
+
+            if (constraint.type === 'foreignKey') {
+                const refSchema = quoteIdentifier(constraint.referencedSchema ?? schema);
+                const refTable = quoteIdentifier(constraint.referencedTable ?? '');
+                const refCols = (constraint.referencedColumns || []).map(col => quoteIdentifier(col)).join(', ');
+                const onUpdate = (constraint.onUpdate || 'NO ACTION').trim() || 'NO ACTION';
+                const onDelete = (constraint.onDelete || 'NO ACTION').trim() || 'NO ACTION';
+                statements.push(
+                    `ALTER TABLE ${tableIdentifier} ADD CONSTRAINT ${quoteIdentifier(cname)} FOREIGN KEY (${columnList}) REFERENCES ${refSchema}.${refTable} (${refCols}) ON UPDATE ${onUpdate} ON DELETE ${onDelete};`
+                );
+                continue;
+            }
+
+            if (constraint.type === 'uniqueIndex') {
+                const method = (constraint.method ?? '').trim();
+                if (method.length > 0) {
+                    statements.push(
+                        `CREATE UNIQUE INDEX ${quoteIdentifier(cname)} ON ${tableIdentifier} USING ${method || 'btree'} (${columnList});`
+                    );
+                } else {
+                    statements.push(
+                        `ALTER TABLE ${tableIdentifier} ADD CONSTRAINT ${quoteIdentifier(cname)} UNIQUE (${columnList});`
+                    );
+                }
+                continue;
+            }
+
+            // default to regular index
+            const method = (constraint.method ?? 'btree').trim() || 'btree';
+            statements.push(
+                `CREATE INDEX ${quoteIdentifier(cname)} ON ${tableIdentifier} USING ${method} (${columnList});`
+            );
+        }
     }
 
     return {

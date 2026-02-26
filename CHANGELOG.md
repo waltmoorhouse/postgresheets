@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [UNRELEASED] - 2026-01-20
+
+### Added
+- **SQL Editor**: Add a full-featured SQL editor experience with:
+  - A CodeLens control bar to run SQL, run selection, and change the connection for the current document
+  - Per-document connection selection and a status bar indicator
+  - Intellisense for table/column names (typing `table.` shows column completions)
+  - Results displayed in a dedicated result view and executed queries added to Query History
+  - **New SQL File** command added to File > New for quickly creating new SQL editors
+- **Schema Designer Constraints**: Added visual editing for non-primary constraints in Alter Table:
+  - Add/edit/drop indexes, composite unique indexes, and foreign keys
+  - Foreign key controls for referenced schema/table/columns plus ON UPDATE/ON DELETE actions
+  - SQL preview and apply flow now includes constraint diffs alongside column changes
+  - Added inline hover tooltips to explain constraint concepts and fields
+
+- **Create Table Wizard Constraints**: Allow users to define indexes, unique indexes, and foreign keys during table creation
+  - New controls mirror schema designer functionality with help tooltips
+  - Constraints are serialized to the preview payload and appear in generated CREATE TABLE statements
+
+
+
+### Fixed
+- **SQL Terminal: Paste handling**: Fixed an issue where pasting single-line or multi-line SQL into the terminal was ignored; paste now supports CR/LF and LF, and multi-statement pastes execute as expected. Added integration tests to cover paste behavior.
+
 ## [3.3.0] - 2025-12-17
 
 ### Added

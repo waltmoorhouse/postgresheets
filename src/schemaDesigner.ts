@@ -16,12 +16,32 @@ interface SchemaDesignerColumnDraft {
     markedForDrop: boolean;
 }
 
+type SchemaDesignerConstraintType = 'index' | 'uniqueIndex' | 'foreignKey';
+
+interface SchemaDesignerConstraintDraft {
+    id: string;
+    name: string;
+    originalName: string | null;
+    type: SchemaDesignerConstraintType;
+    columns: string[];
+    referencedSchema: string | null;
+    referencedTable: string | null;
+    referencedColumns: string[];
+    onUpdate: string | null;
+    onDelete: string | null;
+    method: string | null;
+    isNew: boolean;
+    markedForDrop: boolean;
+}
+
 interface SchemaDesignerInitialPayload {
     view: 'schemaDesigner';
     schemaName: string;
     tableName: string;
     columns: SchemaDesignerColumnState[];
+    constraints: SchemaDesignerConstraintState[];
     typeOptions: string[];
+    indexMethodOptions: string[];
     primaryKey: {
         columns: string[];
         constraintName: string | null;
@@ -41,6 +61,22 @@ interface SchemaDesignerColumnState {
     markedForDrop: boolean;
 }
 
+interface SchemaDesignerConstraintState {
+    id: string;
+    name: string;
+    originalName: string | null;
+    type: SchemaDesignerConstraintType;
+    columns: string[];
+    referencedSchema: string | null;
+    referencedTable: string | null;
+    referencedColumns: string[];
+    onUpdate: string | null;
+    onDelete: string | null;
+    method: string | null;
+    isNew: boolean;
+    markedForDrop: boolean;
+}
+
 interface SchemaDesignerOriginalColumn {
     name: string;
     type: string;
@@ -52,6 +88,7 @@ interface SchemaDesignerOriginalColumn {
 
 interface SchemaDesignerOriginalState {
     columns: SchemaDesignerOriginalColumn[];
+    constraints: SchemaDesignerConstraintState[];
     primaryKeyColumns: string[];
     primaryKeyConstraintName: string | null;
 }
@@ -176,6 +213,21 @@ export class SchemaDesigner {
                 comment: column.comment,
                 isPrimaryKey: column.isPrimaryKey
             })),
+            constraints: state.constraints.map(constraint => ({
+                id: constraint.id,
+                name: constraint.name,
+                originalName: constraint.originalName,
+                type: constraint.type,
+                columns: [...constraint.columns],
+                referencedSchema: constraint.referencedSchema,
+                referencedTable: constraint.referencedTable,
+                referencedColumns: [...constraint.referencedColumns],
+                onUpdate: constraint.onUpdate,
+                onDelete: constraint.onDelete,
+                method: constraint.method,
+                isNew: false,
+                markedForDrop: false
+            })),
             primaryKeyColumns: state.primaryKey.columns,
             primaryKeyConstraintName: state.primaryKey.constraintName
         });
@@ -236,6 +288,75 @@ export class SchemaDesigner {
                 [`${schemaName}.${tableName}`]
             );
 
+                        const uniqueConstraintResult = await client.query(
+                                `SELECT c.conname,
+                                                array_agg(a.attname ORDER BY keys.ord) AS columns
+                                 FROM pg_constraint c
+                                 JOIN pg_class t ON t.oid = c.conrelid
+                                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                                 JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS keys(attnum, ord) ON true
+                                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+                                 WHERE n.nspname = $1
+                                     AND t.relname = $2
+                                     AND c.contype = 'u'
+                                 GROUP BY c.conname
+                                 ORDER BY c.conname;`,
+                                [schemaName, tableName]
+                        );
+
+                        const indexResult = await client.query(
+                                `SELECT idx.relname AS index_name,
+                                                i.indisunique AS is_unique,
+                                                am.amname AS method,
+                                                array_agg(a.attname ORDER BY keys.ord) AS columns
+                                 FROM pg_index i
+                                 JOIN pg_class t ON t.oid = i.indrelid
+                                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                                 JOIN pg_class idx ON idx.oid = i.indexrelid
+                                 JOIN pg_am am ON am.oid = idx.relam
+                                 JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS keys(attnum, ord) ON true
+                                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+                                 LEFT JOIN pg_constraint c ON c.conindid = i.indexrelid
+                                 WHERE n.nspname = $1
+                                     AND t.relname = $2
+                                     AND NOT i.indisprimary
+                                     AND c.oid IS NULL
+                                 GROUP BY idx.relname, i.indisunique, am.amname
+                                 ORDER BY idx.relname;`,
+                                [schemaName, tableName]
+                        );
+
+                        const foreignKeyResult = await client.query(
+                                `SELECT c.conname,
+                                                array_agg(src.attname ORDER BY keys.ord) AS columns,
+                                                n2.nspname AS referenced_schema,
+                                                t2.relname AS referenced_table,
+                                                array_agg(ref.attname ORDER BY keys.ord) AS referenced_columns,
+                                                c.confupdtype,
+                                                c.confdeltype
+                                 FROM pg_constraint c
+                                 JOIN pg_class t ON t.oid = c.conrelid
+                                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                                 JOIN pg_class t2 ON t2.oid = c.confrelid
+                                 JOIN pg_namespace n2 ON n2.oid = t2.relnamespace
+                                 JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS keys(src_attnum, ref_attnum, ord) ON true
+                                 JOIN pg_attribute src ON src.attrelid = t.oid AND src.attnum = keys.src_attnum
+                                 JOIN pg_attribute ref ON ref.attrelid = t2.oid AND ref.attnum = keys.ref_attnum
+                                 WHERE n.nspname = $1
+                                     AND t.relname = $2
+                                     AND c.contype = 'f'
+                                 GROUP BY c.conname, n2.nspname, t2.relname, c.confupdtype, c.confdeltype
+                                 ORDER BY c.conname;`,
+                                [schemaName, tableName]
+                        );
+
+                        const indexMethodResult = await client.query(
+                                `SELECT amname
+                                 FROM pg_am
+                                 WHERE amtype = 'i'
+                                 ORDER BY amname;`
+                        );
+
             const columns: SchemaDesignerColumnState[] = columnsResult.rows.map((row: any, index: number) => ({
                 id: `col-${index}-${row.column_name}`,
                 name: row.column_name as string,
@@ -250,6 +371,68 @@ export class SchemaDesigner {
             }));
 
             const typeOptions = Array.from(new Set([...COMMON_TYPES, ...columns.map(column => column.type)])).sort((a, b) => a.localeCompare(b));
+            const indexMethodOptions = Array.from(new Set([
+                'btree',
+                ...indexMethodResult.rows.map((row: any) => String(row.amname))
+            ])).sort((a, b) => a.localeCompare(b));
+
+            const constraints: SchemaDesignerConstraintState[] = [];
+
+            for (const row of uniqueConstraintResult.rows) {
+                constraints.push({
+                    id: `uk-${String(row.conname)}`,
+                    name: String(row.conname),
+                    originalName: String(row.conname),
+                    type: 'uniqueIndex',
+                    columns: Array.isArray(row.columns) ? row.columns.map((value: unknown) => String(value)) : [],
+                    referencedSchema: null,
+                    referencedTable: null,
+                    referencedColumns: [],
+                    onUpdate: null,
+                    onDelete: null,
+                    method: null,
+                    isNew: false,
+                    markedForDrop: false
+                });
+            }
+
+            for (const row of indexResult.rows) {
+                constraints.push({
+                    id: `idx-${String(row.index_name)}`,
+                    name: String(row.index_name),
+                    originalName: String(row.index_name),
+                    type: Boolean(row.is_unique) ? 'uniqueIndex' : 'index',
+                    columns: Array.isArray(row.columns) ? row.columns.map((value: unknown) => String(value)) : [],
+                    referencedSchema: null,
+                    referencedTable: null,
+                    referencedColumns: [],
+                    onUpdate: null,
+                    onDelete: null,
+                    method: row.method ? String(row.method) : 'btree',
+                    isNew: false,
+                    markedForDrop: false
+                });
+            }
+
+            for (const row of foreignKeyResult.rows) {
+                constraints.push({
+                    id: `fk-${String(row.conname)}`,
+                    name: String(row.conname),
+                    originalName: String(row.conname),
+                    type: 'foreignKey',
+                    columns: Array.isArray(row.columns) ? row.columns.map((value: unknown) => String(value)) : [],
+                    referencedSchema: row.referenced_schema ? String(row.referenced_schema) : null,
+                    referencedTable: row.referenced_table ? String(row.referenced_table) : null,
+                    referencedColumns: Array.isArray(row.referenced_columns)
+                        ? row.referenced_columns.map((value: unknown) => String(value))
+                        : [],
+                    onUpdate: this.decodeForeignKeyAction(row.confupdtype),
+                    onDelete: this.decodeForeignKeyAction(row.confdeltype),
+                    method: null,
+                    isNew: false,
+                    markedForDrop: false
+                });
+            }
 
             const primaryKeyColumns = columns.filter(column => column.isPrimaryKey).map(column => column.name);
             const constraintName = constraintResult.rows[0]?.conname ? String(constraintResult.rows[0].conname) : null;
@@ -259,7 +442,9 @@ export class SchemaDesigner {
                 schemaName,
                 tableName,
                 columns,
+                constraints,
                 typeOptions,
+                indexMethodOptions,
                 primaryKey: {
                     columns: primaryKeyColumns,
                     constraintName
@@ -323,7 +508,8 @@ export class SchemaDesigner {
         switch (message.command) {
             case 'requestPreview': {
                 const drafts = this.normalizeDrafts(message.payload);
-                const preview = this.buildPreview(schemaName, tableName, panel, drafts);
+                const constraints = this.normalizeConstraints(message.payload);
+                const preview = this.buildPreview(schemaName, tableName, panel, drafts, constraints);
                 const sql = this.formatPreview(preview.statements);
                 const payload: PreviewMessagePayload = {
                     sql,
@@ -334,9 +520,10 @@ export class SchemaDesigner {
             }
             case 'executeSchemaChanges': {
                 const drafts = this.normalizeDrafts(message.payload);
+                const constraints = this.normalizeConstraints(message.payload);
                 const useManualSql = Boolean(message.payload?.useManualSql);
                 const manualSql = typeof message.payload?.sql === 'string' ? message.payload.sql : '';
-                await this.executeChanges(panel, connectionId, schemaName, tableName, drafts, useManualSql, manualSql);
+                await this.executeChanges(panel, connectionId, schemaName, tableName, drafts, constraints, useManualSql, manualSql);
                 break;
             }
             case 'refreshStructure': {
@@ -371,11 +558,35 @@ export class SchemaDesigner {
         }));
     }
 
+    private normalizeConstraints(payload: any): SchemaDesignerConstraintDraft[] {
+        if (!payload || typeof payload !== 'object') {
+            return [];
+        }
+
+        const constraints = Array.isArray(payload.constraints) ? payload.constraints : [];
+        return constraints.map((constraint: any) => ({
+            id: String(constraint.id ?? ''),
+            name: String(constraint.name ?? ''),
+            originalName: constraint.originalName != null ? String(constraint.originalName) : null,
+            type: this.normalizeConstraintType(constraint.type),
+            columns: this.normalizeStringArray(constraint.columns),
+            referencedSchema: this.normalizeOptionalString(constraint.referencedSchema),
+            referencedTable: this.normalizeOptionalString(constraint.referencedTable),
+            referencedColumns: this.normalizeStringArray(constraint.referencedColumns),
+            onUpdate: this.normalizeOptionalString(constraint.onUpdate),
+            onDelete: this.normalizeOptionalString(constraint.onDelete),
+            method: this.normalizeOptionalString(constraint.method),
+            isNew: Boolean(constraint.isNew),
+            markedForDrop: Boolean(constraint.markedForDrop)
+        }));
+    }
+
     private buildPreview(
         schemaName: string,
         tableName: string,
         panel: vscode.WebviewPanel,
-        drafts: SchemaDesignerColumnDraft[]
+        drafts: SchemaDesignerColumnDraft[],
+        constraintDrafts: SchemaDesignerConstraintDraft[]
     ): PreviewResult {
         const original = this.originalState.get(panel);
         if (!original) {
@@ -390,6 +601,8 @@ export class SchemaDesigner {
         const dropStatements: string[] = [];
         const addStatements: string[] = [];
         const commentStatements: string[] = [];
+        const dropConstraintStatements: string[] = [];
+        const createConstraintStatements: string[] = [];
         const warnings: string[] = [];
 
         const originalByName = new Map<string, SchemaDesignerOriginalColumn>();
@@ -485,6 +698,59 @@ export class SchemaDesigner {
         const originalPrimarySet = new Set(original.primaryKeyColumns.map(name => name.trim()).filter(Boolean));
         const primaryKeyChanged = !this.setsEqual(originalPrimarySet, newPrimaryOriginalNames);
 
+        const originalConstraintsByName = new Map<string, SchemaDesignerConstraintState>();
+        for (const constraint of original.constraints) {
+            originalConstraintsByName.set(constraint.name, constraint);
+        }
+
+        const incomingConstraintNames = new Set(
+            constraintDrafts
+                .map(constraint => (constraint.originalName ?? constraint.name).trim())
+                .filter(name => name.length > 0)
+        );
+
+        for (const originalConstraint of original.constraints) {
+            if (!incomingConstraintNames.has(originalConstraint.name)) {
+                dropConstraintStatements.push(this.buildConstraintDropStatement(schemaName, tableName, originalConstraint));
+            }
+        }
+
+        for (const draft of constraintDrafts) {
+            const constraintName = draft.name.trim();
+            const originalName = (draft.originalName ?? '').trim();
+            const lookupName = originalName.length > 0 ? originalName : constraintName;
+            const originalConstraint = originalConstraintsByName.get(lookupName);
+
+            if (draft.markedForDrop) {
+                if (originalConstraint) {
+                    dropConstraintStatements.push(this.buildConstraintDropStatement(schemaName, tableName, originalConstraint));
+                }
+                continue;
+            }
+
+            if (!constraintName) {
+                continue;
+            }
+
+            if (!this.isConstraintDraftValid(draft)) {
+                warnings.push(`Constraint "${constraintName}" is incomplete and was skipped in SQL preview.`);
+                continue;
+            }
+
+            if (!originalConstraint) {
+                createConstraintStatements.push(this.buildConstraintCreateStatement(schemaName, tableName, draft));
+                continue;
+            }
+
+            if (!this.constraintsEqual(originalConstraint, draft)) {
+                dropConstraintStatements.push(this.buildConstraintDropStatement(schemaName, tableName, originalConstraint));
+                createConstraintStatements.push(this.buildConstraintCreateStatement(schemaName, tableName, draft));
+                if (draft.type === 'foreignKey') {
+                    warnings.push(`Changing foreign key "${constraintName}" may fail if existing rows violate the new reference.`);
+                }
+            }
+        }
+
         const statements: string[] = [];
         if (renameStatements.length > 0) {
             statements.push(...renameStatements);
@@ -497,6 +763,10 @@ export class SchemaDesigner {
         }
         if (defaultStatements.length > 0) {
             statements.push(...defaultStatements);
+        }
+
+        if (dropConstraintStatements.length > 0) {
+            statements.push(...dropConstraintStatements);
         }
 
         let droppedConstraint = false;
@@ -525,6 +795,10 @@ export class SchemaDesigner {
             statements.push(...commentStatements);
         }
 
+        if (createConstraintStatements.length > 0) {
+            statements.push(...createConstraintStatements);
+        }
+
         return {
             statements: statements.map(statement => statement.endsWith(';') ? statement.slice(0, -1) : statement),
             warnings
@@ -537,6 +811,7 @@ export class SchemaDesigner {
         schemaName: string,
         tableName: string,
         drafts: SchemaDesignerColumnDraft[],
+        constraints: SchemaDesignerConstraintDraft[],
         useManualSql: boolean,
         manualSql: string
     ): Promise<void> {
@@ -558,7 +833,7 @@ export class SchemaDesigner {
                 .map(part => part.trim())
                 .filter(Boolean);
         } else {
-            const preview = this.buildPreview(schemaName, tableName, panel, drafts);
+            const preview = this.buildPreview(schemaName, tableName, panel, drafts, constraints);
             statements = preview.statements;
         }
 
@@ -591,6 +866,158 @@ export class SchemaDesigner {
         } finally {
             this.connectionManager.markIdle(connectionId);
         }
+    }
+
+    private normalizeConstraintType(value: unknown): SchemaDesignerConstraintType {
+        if (value === 'foreignKey' || value === 'uniqueIndex' || value === 'index') {
+            return value;
+        }
+        return 'index';
+    }
+
+    private normalizeOptionalString(value: unknown): string | null {
+        const text = typeof value === 'string' ? value.trim() : '';
+        return text.length > 0 ? text : null;
+    }
+
+    private normalizeStringArray(value: unknown): string[] {
+        if (!Array.isArray(value)) {
+            return [];
+        }
+        const normalized: string[] = [];
+        for (const entry of value) {
+            const text = typeof entry === 'string' ? entry.trim() : '';
+            if (text.length > 0) {
+                normalized.push(text);
+            }
+        }
+        return normalized;
+    }
+
+    private normalizeForeignKeyAction(value: string | null): string {
+        const normalized = (value ?? 'NO ACTION').trim().toUpperCase();
+        if (normalized === 'RESTRICT' || normalized === 'CASCADE' || normalized === 'SET NULL' || normalized === 'SET DEFAULT') {
+            return normalized;
+        }
+        return 'NO ACTION';
+    }
+
+    private isConstraintDraftValid(draft: SchemaDesignerConstraintDraft): boolean {
+        if (draft.columns.length === 0 || draft.name.trim().length === 0) {
+            return false;
+        }
+        if (draft.type !== 'foreignKey') {
+            return true;
+        }
+        if (!draft.referencedSchema || !draft.referencedTable) {
+            return false;
+        }
+        if (draft.referencedColumns.length === 0) {
+            return false;
+        }
+        return draft.columns.length === draft.referencedColumns.length;
+    }
+
+    private decodeForeignKeyAction(value: unknown): string {
+        const code = typeof value === 'string' ? value : '';
+        switch (code) {
+            case 'r':
+                return 'RESTRICT';
+            case 'c':
+                return 'CASCADE';
+            case 'n':
+                return 'SET NULL';
+            case 'd':
+                return 'SET DEFAULT';
+            case 'a':
+            default:
+                return 'NO ACTION';
+        }
+    }
+
+    private constraintsEqual(original: SchemaDesignerConstraintState, draft: SchemaDesignerConstraintDraft): boolean {
+        if (original.name !== draft.name.trim()) {
+            return false;
+        }
+        if (original.type !== draft.type) {
+            return false;
+        }
+        if (!this.arraysEqual(original.columns, draft.columns)) {
+            return false;
+        }
+
+        if (draft.type === 'foreignKey') {
+            return (original.referencedSchema ?? '') === (draft.referencedSchema ?? '')
+                && (original.referencedTable ?? '') === (draft.referencedTable ?? '')
+                && this.arraysEqual(original.referencedColumns, draft.referencedColumns)
+                && this.normalizeForeignKeyAction(original.onUpdate) === this.normalizeForeignKeyAction(draft.onUpdate)
+                && this.normalizeForeignKeyAction(original.onDelete) === this.normalizeForeignKeyAction(draft.onDelete);
+        }
+
+        if (draft.type === 'index') {
+            return (original.method ?? 'btree').toLowerCase() === (draft.method ?? 'btree').toLowerCase();
+        }
+
+        if (draft.type === 'uniqueIndex') {
+            if ((original.method ?? '') !== (draft.method ?? '')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private arraysEqual(a: string[], b: string[]): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i += 1) {
+            if (a[i] !== b[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private buildConstraintDropStatement(
+        schemaName: string,
+        tableName: string,
+        constraint: SchemaDesignerConstraintState
+    ): string {
+        if (constraint.type === 'index' || (constraint.type === 'uniqueIndex' && (constraint.method ?? '').trim().length > 0)) {
+            return `DROP INDEX ${quoteIdentifier(schemaName)}.${quoteIdentifier(constraint.name)};`;
+        }
+        const qualifiedTable = `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
+        return `ALTER TABLE ${qualifiedTable} DROP CONSTRAINT ${quoteIdentifier(constraint.name)};`;
+    }
+
+    private buildConstraintCreateStatement(
+        schemaName: string,
+        tableName: string,
+        constraint: SchemaDesignerConstraintDraft
+    ): string {
+        const qualifiedTable = `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
+        const columnList = constraint.columns.map(column => quoteIdentifier(column)).join(', ');
+
+        if (constraint.type === 'foreignKey') {
+            const referencedSchema = quoteIdentifier(constraint.referencedSchema ?? schemaName);
+            const referencedTable = quoteIdentifier(constraint.referencedTable ?? '');
+            const referencedColumns = constraint.referencedColumns.map(column => quoteIdentifier(column)).join(', ');
+            const onUpdate = this.normalizeForeignKeyAction(constraint.onUpdate);
+            const onDelete = this.normalizeForeignKeyAction(constraint.onDelete);
+            return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} FOREIGN KEY (${columnList}) REFERENCES ${referencedSchema}.${referencedTable} (${referencedColumns}) ON UPDATE ${onUpdate} ON DELETE ${onDelete};`;
+        }
+
+        if (constraint.type === 'uniqueIndex') {
+            if ((constraint.method ?? '').trim().length > 0) {
+                const method = (constraint.method ?? 'btree').trim() || 'btree';
+                return `CREATE UNIQUE INDEX ${quoteIdentifier(constraint.name)} ON ${qualifiedTable} USING ${method} (${columnList});`;
+            }
+            return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} UNIQUE (${columnList});`;
+        }
+
+        const method = (constraint.method ?? 'btree').trim() || 'btree';
+        return `CREATE INDEX ${quoteIdentifier(constraint.name)} ON ${qualifiedTable} USING ${method} (${columnList});`;
     }
 
     private defaultsEqual(a: string | null, b: string | null): boolean {

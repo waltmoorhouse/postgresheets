@@ -519,7 +519,9 @@ _____________________________________________
 ☐ All columns listed  
 ☐ Column properties correct (type, nullable, default)  
 ☐ Primary key indicated  
-☐ Foreign keys shown (if implemented)  
+☐ Existing indexes listed  
+☐ Existing unique indexes listed (including multi-column entries)  
+☐ Existing foreign keys listed with referenced table/column info  
 
 **Notes:**
 _____________________________________________
@@ -547,14 +549,18 @@ _____________________________________________
 
 ### Delete Column
 ☐ Select column  
-☐ Click "Delete" button  
+☐ Click "Drop" button  
 ☐ Column marked for deletion  
 ☐ Can undo deletion  
 
-### Reorder Columns
-☐ Drag and drop (if implemented)  
-☐ Or up/down buttons  
-☐ Order updates  
+### Constraint Operations
+☐ Add regular index and choose method  
+☐ Add unique index across multiple columns (comma-separated list)  
+☐ Add foreign key with referenced schema/table/columns  
+☐ Set foreign key ON UPDATE and ON DELETE actions  
+☐ Edit existing constraint details  
+☐ Drop and restore existing constraints  
+☐ Hover tooltip help appears for constraint guidance  
 
 **Notes:**
 _____________________________________________
@@ -571,6 +577,7 @@ _____________________________________________
 
 ### Multiple Changes
 ☐ Multiple column changes shown  
+☐ Constraint changes shown (ADD/DROP/RECREATE)  
 ☐ Statements in correct order  
 ☐ Dependencies handled (drop FK before column)  
 

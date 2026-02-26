@@ -86,12 +86,32 @@ export interface SchemaDesignerColumn {
   markedForDrop: boolean;
 }
 
+export type SchemaDesignerConstraintType = 'index' | 'uniqueIndex' | 'foreignKey';
+
+export interface SchemaDesignerConstraint {
+  id: string;
+  name: string;
+  originalName: string | null;
+  type: SchemaDesignerConstraintType;
+  columns: string[];
+  referencedSchema: string | null;
+  referencedTable: string | null;
+  referencedColumns: string[];
+  onUpdate: string | null;
+  onDelete: string | null;
+  method: string | null;
+  isNew: boolean;
+  markedForDrop: boolean;
+}
+
 export interface SchemaDesignerInitialState {
   view: 'schemaDesigner';
   schemaName: string;
   tableName: string;
   columns: SchemaDesignerColumn[];
+  constraints: SchemaDesignerConstraint[];
   typeOptions: string[];
+  indexMethodOptions: string[];
   primaryKey: {
     columns: string[];
     constraintName: string | null;
@@ -100,6 +120,7 @@ export interface SchemaDesignerInitialState {
 
 export interface SchemaDesignerPreviewPayload {
   columns: SchemaDesignerColumn[];
+  constraints: SchemaDesignerConstraint[];
   useManualSql?: boolean;
   sql?: string;
 }
@@ -120,11 +141,14 @@ export interface CreateTableInitialState {
   suggestedTableName: string;
   typeOptions: string[];
   columns: CreateTableColumnDraft[];
+  // New constraints list parallels schema designer
+  constraints?: SchemaDesignerConstraint[];
 }
 
 export interface CreateTablePreviewPayload {
   tableName: string;
   columns: CreateTableColumnDraft[];
+  constraints?: SchemaDesignerConstraint[];
   useManualSql?: boolean;
   sql?: string;
 }

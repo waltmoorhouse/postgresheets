@@ -13,9 +13,25 @@ interface CreateTableColumnDraft {
     isPrimaryKey: boolean;
 }
 
+interface CreateTableConstraintDraft {
+    id: string;
+    name: string;
+    type: 'index' | 'uniqueIndex' | 'foreignKey';
+    columns: string[];
+    referencedSchema: string | null;
+    referencedTable: string | null;
+    referencedColumns: string[];
+    onUpdate: string | null;
+    onDelete: string | null;
+    method: string | null;
+    isNew?: boolean;
+    markedForDrop?: boolean;
+}
+
 interface CreateTablePreviewPayload {
     tableName: string;
     columns: CreateTableColumnDraft[];
+    constraints?: CreateTableConstraintDraft[];
 }
 
 interface PreviewResultMessage {
@@ -28,6 +44,7 @@ interface ExecutionResultMessage {
     success: boolean;
     error?: string;
 }
+
 
 const COMMON_TYPES = [
     'bigint',
@@ -142,7 +159,8 @@ export class CreateTableWizard {
                         comment: null,
                         isPrimaryKey: true
                     }
-                ]
+                ],
+                constraints: []
             };
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load column metadata: ${error}`);
@@ -203,7 +221,7 @@ export class CreateTableWizard {
                 panel.webview.postMessage({ command: 'createTablePreview', payload: message });
                 return;
             }
-            const result = buildCreateTableStatements(schemaName, data.tableName, data.columns);
+            const result = buildCreateTableStatements(schemaName, data.tableName, data.columns, data.constraints);
             message.sql = result.statements.join('\n\n');
             if (result.warnings.length > 0) {
                 message.warnings = result.warnings;
@@ -218,6 +236,7 @@ export class CreateTableWizard {
     private normalizePreviewPayload(payload: any): CreateTablePreviewPayload {
         const tableName = typeof payload?.tableName === 'string' ? payload.tableName.trim() : '';
         const columnsInput = Array.isArray(payload?.columns) ? payload.columns : [];
+        const constraintsInput = Array.isArray(payload?.constraints) ? payload.constraints : [];
         const columns: CreateTableColumnDraft[] = columnsInput.map((column: any) => ({
             id: String(column?.id ?? ''),
             name: String(column?.name ?? '').trim(),
@@ -231,8 +250,11 @@ export class CreateTableWizard {
                 : null,
             isPrimaryKey: Boolean(column?.isPrimaryKey)
         }));
-        return { tableName, columns };
-    }
+        const constraints: CreateTableConstraintDraft[] = constraintsInput.map((constraint: any) => ({
+            ...constraint
+        }));
+         return { tableName, columns, constraints };
+     }
 
     private async handleExecute(
         panel: vscode.WebviewPanel,
@@ -272,7 +294,7 @@ export class CreateTableWizard {
                 return;
             }
             try {
-                const result = buildCreateTableStatements(schemaName, tableName, previewData.columns);
+                const result = buildCreateTableStatements(schemaName, tableName, previewData.columns, previewData.constraints);
                 statements = result.statements;
             } catch (error) {
                 message.error = error instanceof Error ? error.message : String(error);

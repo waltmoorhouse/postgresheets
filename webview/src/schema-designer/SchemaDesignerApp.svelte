@@ -5,6 +5,8 @@
     VSCodeApi,
     SchemaDesignerInitialState,
     SchemaDesignerColumn,
+    SchemaDesignerConstraint,
+    SchemaDesignerConstraintType,
     SchemaDesignerPreviewPayload
   } from '$lib/types';
 
@@ -15,10 +17,16 @@
     errors: string[];
   }
 
+  interface DesignerConstraint extends SchemaDesignerConstraint {
+    errors: string[];
+  }
+
   let schemaName = '';
   let tableName = '';
   let columns: DesignerColumn[] = [];
+  let constraints: DesignerConstraint[] = [];
   let typeOptions: string[] = [];
+  let indexMethodOptions: string[] = [];
   let sqlPreview = '/* No changes */';
   let previewWarnings: string[] = [];
   let previewLoading = false;
@@ -33,6 +41,8 @@
   let dirty = false;
 
   let globalErrors: string[] = [];
+
+  const FK_ACTIONS = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
 
   const COMMON_TYPES = [
     'bigint',
@@ -55,8 +65,15 @@
     schemaName = state.schemaName;
     tableName = state.tableName;
     typeOptions = Array.from(new Set([...state.typeOptions, ...COMMON_TYPES])).sort((a, b) => a.localeCompare(b));
+    indexMethodOptions = Array.from(new Set(['btree', ...(state.indexMethodOptions ?? [])])).sort((a, b) => a.localeCompare(b));
     columns = state.columns.map((column) => ({
       ...column,
+      errors: []
+    }));
+    constraints = state.constraints.map((constraint) => ({
+      ...constraint,
+      columns: [...constraint.columns],
+      referencedColumns: [...constraint.referencedColumns],
       errors: []
     }));
 
@@ -69,7 +86,7 @@
     dirty = false;
     globalErrors = [];
 
-    validateColumns();
+    validateDraftState();
     requestPreview(true);
   }
 
@@ -86,7 +103,7 @@
 
   function markDirty(): void {
     dirty = true;
-    validateColumns();
+    validateDraftState();
     schedulePreview();
   }
 
@@ -113,11 +130,11 @@
     previewLoading = true;
     ensureVscode().postMessage({
       command: 'requestPreview',
-      payload: serializeColumns()
+      payload: serializeDraftState()
     });
   }
 
-  function serializeColumns(): SchemaDesignerPreviewPayload {
+  function serializeDraftState(): SchemaDesignerPreviewPayload {
     return {
       columns: columns.map((column) => ({
         id: column.id,
@@ -130,6 +147,21 @@
         isPrimaryKey: column.isPrimaryKey,
         isNew: column.isNew,
         markedForDrop: column.markedForDrop
+      })),
+      constraints: constraints.map((constraint) => ({
+        id: constraint.id,
+        name: constraint.name,
+        originalName: constraint.originalName,
+        type: constraint.type,
+        columns: [...constraint.columns],
+        referencedSchema: constraint.referencedSchema,
+        referencedTable: constraint.referencedTable,
+        referencedColumns: [...constraint.referencedColumns],
+        onUpdate: constraint.onUpdate,
+        onDelete: constraint.onDelete,
+        method: constraint.method,
+        isNew: constraint.isNew,
+        markedForDrop: constraint.markedForDrop
       }))
     };
   }
@@ -184,7 +216,27 @@
 
   function handleNameInput(column: DesignerColumn, event: Event): void {
     const target = event.currentTarget as HTMLInputElement | null;
-    updateColumn(column, 'name', target?.value ?? '');
+    const previousName = column.name;
+    const nextName = target?.value ?? '';
+
+    columns = columns.map((current) => {
+      if (current.id !== column.id) {
+        return current;
+      }
+      return {
+        ...current,
+        name: nextName
+      };
+    });
+
+    if (previousName !== nextName) {
+      constraints = constraints.map((constraint) => ({
+        ...constraint,
+        columns: constraint.columns.map((name) => (name === previousName ? nextName : name))
+      }));
+    }
+
+    markDirty();
   }
 
   function handleTypeChange(column: DesignerColumn, event: Event): void {
@@ -223,7 +275,7 @@
       return {
         ...current,
         markedForDrop: next,
-        isPrimaryKey: next ? current.isPrimaryKey : false
+        isPrimaryKey: next ? false : current.isPrimaryKey
       };
     });
     markDirty();
@@ -251,9 +303,15 @@
     return map;
   }
 
-  function validateColumns(): void {
+  function validateDraftState(): void {
     globalErrors = [];
     const duplicates = duplicateNameCheck();
+    const activeColumnNames = new Set(
+      columns
+        .filter((column) => !column.markedForDrop)
+        .map((column) => column.name.trim())
+        .filter((name) => name.length > 0)
+    );
 
     columns = columns.map((column) => {
       const errors: string[] = [];
@@ -287,6 +345,203 @@
     if (activeColumns.some((column) => column.errors.length > 0)) {
       globalErrors.push('Resolve column validation errors before continuing.');
     }
+
+    const constraintNameCounts = new Map<string, number>();
+    constraints.forEach((constraint) => {
+      if (constraint.markedForDrop) {
+        return;
+      }
+      const key = constraint.name.trim().toLowerCase();
+      if (!key) {
+        return;
+      }
+      constraintNameCounts.set(key, (constraintNameCounts.get(key) ?? 0) + 1);
+    });
+
+    constraints = constraints.map((constraint) => {
+      const errors: string[] = [];
+      if (constraint.markedForDrop) {
+        return {
+          ...constraint,
+          errors
+        };
+      }
+
+      const name = constraint.name.trim();
+      if (!name) {
+        errors.push('Constraint name is required');
+      } else if ((constraintNameCounts.get(name.toLowerCase()) ?? 0) > 1) {
+        errors.push('Duplicate constraint name');
+      }
+
+      if (constraint.columns.length === 0) {
+        errors.push('At least one local column is required');
+      }
+
+      const unknownColumns = constraint.columns.filter((columnName) => !activeColumnNames.has(columnName));
+      if (unknownColumns.length > 0) {
+        errors.push(`Unknown/dropped local columns: ${unknownColumns.join(', ')}`);
+      }
+
+      if (constraint.type === 'foreignKey') {
+        if (!(constraint.referencedSchema ?? '').trim()) {
+          errors.push('Referenced schema is required for foreign keys');
+        }
+        if (!(constraint.referencedTable ?? '').trim()) {
+          errors.push('Referenced table is required for foreign keys');
+        }
+        if (constraint.referencedColumns.length === 0) {
+          errors.push('Referenced columns are required for foreign keys');
+        }
+        if (constraint.columns.length !== constraint.referencedColumns.length) {
+          errors.push('Local and referenced column counts must match');
+        }
+      }
+
+      if (constraint.type === 'index' && !(constraint.method ?? '').trim()) {
+        errors.push('Index method is required');
+      }
+
+      return {
+        ...constraint,
+        errors
+      };
+    });
+
+    if (constraints.some((constraint) => !constraint.markedForDrop && constraint.errors.length > 0)) {
+      globalErrors.push('Resolve constraint validation errors before continuing.');
+    }
+  }
+
+  function parseCsvList(input: string): string[] {
+    return input
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  }
+
+  function updateConstraint<K extends keyof DesignerConstraint>(
+    constraint: DesignerConstraint,
+    key: K,
+    value: DesignerConstraint[K]
+  ): void {
+    constraints = constraints.map((current) => {
+      if (current.id !== constraint.id) {
+        return current;
+      }
+      return {
+        ...current,
+        [key]: value
+      } as DesignerConstraint;
+    });
+    markDirty();
+  }
+
+  function addConstraint(type: SchemaDesignerConstraintType): void {
+    const existingNames = new Set(
+      constraints
+        .filter((constraint) => !constraint.markedForDrop)
+        .map((constraint) => constraint.name.trim().toLowerCase())
+        .filter((name) => name.length > 0)
+    );
+
+    let index = 1;
+    const base = type === 'foreignKey' ? `${tableName}_fk` : type === 'uniqueIndex' ? `${tableName}_uniq` : `${tableName}_idx`;
+    let suggestedName = `${base}_${index}`;
+    while (existingNames.has(suggestedName.toLowerCase())) {
+      index += 1;
+      suggestedName = `${base}_${index}`;
+    }
+
+    const firstColumn = columns.find((column) => !column.markedForDrop)?.name ?? '';
+    constraints = [
+      ...constraints,
+      {
+        id: `new-constraint-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: suggestedName,
+        originalName: null,
+        type,
+        columns: firstColumn ? [firstColumn] : [],
+        referencedSchema: type === 'foreignKey' ? schemaName : null,
+        referencedTable: null,
+        referencedColumns: [],
+        onUpdate: type === 'foreignKey' ? 'NO ACTION' : null,
+        onDelete: type === 'foreignKey' ? 'NO ACTION' : null,
+        method: type === 'index' ? (indexMethodOptions[0] ?? 'btree') : null,
+        isNew: true,
+        markedForDrop: false,
+        errors: []
+      }
+    ];
+
+    markDirty();
+  }
+
+  function toggleConstraintDrop(constraint: DesignerConstraint): void {
+    if (constraint.isNew) {
+      constraints = constraints.filter((current) => current.id !== constraint.id);
+      markDirty();
+      return;
+    }
+
+    constraints = constraints.map((current) => {
+      if (current.id !== constraint.id) {
+        return current;
+      }
+      return {
+        ...current,
+        markedForDrop: !current.markedForDrop
+      };
+    });
+
+    markDirty();
+  }
+
+  function handleConstraintNameInput(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLInputElement | null;
+    updateConstraint(constraint, 'name', target?.value ?? '');
+  }
+
+  function handleConstraintTypeChange(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLSelectElement | null;
+    updateConstraint(constraint, 'type', (target?.value as SchemaDesignerConstraintType) ?? constraint.type);
+  }
+
+  function handleConstraintColumnsInput(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLInputElement | null;
+    updateConstraint(constraint, 'columns', parseCsvList(target?.value ?? ''));
+  }
+
+  function handleConstraintReferencedSchemaInput(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLInputElement | null;
+    const value = (target?.value ?? '').trim();
+    updateConstraint(constraint, 'referencedSchema', value.length > 0 ? value : null);
+  }
+
+  function handleConstraintReferencedTableInput(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLInputElement | null;
+    const value = (target?.value ?? '').trim();
+    updateConstraint(constraint, 'referencedTable', value.length > 0 ? value : null);
+  }
+
+  function handleConstraintReferencedColumnsInput(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLInputElement | null;
+    updateConstraint(constraint, 'referencedColumns', parseCsvList(target?.value ?? ''));
+  }
+
+  function handleConstraintMethodChange(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLSelectElement | null;
+    updateConstraint(constraint, 'method', target?.value ?? 'btree');
+  }
+
+  function handleConstraintOnUpdateChange(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLSelectElement | null;
+    updateConstraint(constraint, 'onUpdate', target?.value ?? 'NO ACTION');
+  }
+
+  function handleConstraintOnDeleteChange(constraint: DesignerConstraint, event: Event): void {
+    const target = event.currentTarget as HTMLSelectElement | null;
+    updateConstraint(constraint, 'onDelete', target?.value ?? 'NO ACTION');
   }
 
   function handleManualToggle(event: Event): void {
@@ -302,7 +557,7 @@
   }
 
   function handleExecute(): void {
-    validateColumns();
+    validateDraftState();
     if (globalErrors.length > 0) {
       executionError = globalErrors.join('\n');
       executionMessage = '';
@@ -316,7 +571,7 @@
     ensureVscode().postMessage({
       command: 'executeSchemaChanges',
       payload: {
-        ...serializeColumns(),
+        ...serializeDraftState(),
         useManualSql: showManualSql,
         sql: showManualSql ? manualSql : undefined
       }
@@ -387,6 +642,7 @@
       <h2>{schemaName}.<span>{tableName}</span></h2>
       <p class="designer-header__meta">
         <span>Columns: {columns.length}</span>
+        <span>Constraints: {constraints.length}</span>
         {#if dirty}
           <span class="designer-header__badge" title="Unsaved changes">Unsaved</span>
         {/if}
@@ -537,6 +793,170 @@
             {/if}
           </tbody>
         </table>
+
+        <section class="constraint-section" aria-label="Table constraints">
+          <header class="constraint-header">
+            <h3>
+              Constraints
+              <span class="help-tip" title="Manage table indexes, unique indexes (including multi-column), and foreign keys.">?</span>
+            </h3>
+            <div class="constraint-actions" role="toolbar" aria-label="Add constraints">
+              <button type="button" class="ps-btn ps-btn--ghost" on:click={() => addConstraint('index')}>Add index</button>
+              <button type="button" class="ps-btn ps-btn--ghost" on:click={() => addConstraint('uniqueIndex')}>Add unique index</button>
+              <button type="button" class="ps-btn ps-btn--ghost" on:click={() => addConstraint('foreignKey')}>Add foreign key</button>
+            </div>
+          </header>
+
+          <table class="constraint-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">
+                  Type
+                  <span class="help-tip" title="Unique index can include multiple columns for composite uniqueness.">?</span>
+                </th>
+                <th scope="col">Columns</th>
+                <th scope="col">Reference</th>
+                <th scope="col">Method</th>
+                <th scope="col">On Update</th>
+                <th scope="col">On Delete</th>
+                <th scope="col" class="actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#if constraints.length === 0}
+                <tr>
+                  <td colspan="8" class="empty">No non-primary constraints defined.</td>
+                </tr>
+              {:else}
+                {#each constraints as constraint (constraint.id)}
+                  <tr class={clsx({ dropped: constraint.markedForDrop })}>
+                    <td>
+                      <input
+                        type="text"
+                        value={constraint.name}
+                        disabled={constraint.markedForDrop}
+                        class:has-error={constraint.errors.some((error) => error.includes('name'))}
+                        on:input={(event) => handleConstraintNameInput(constraint, event)}
+                      >
+                    </td>
+                    <td>
+                      <select
+                        value={constraint.type}
+                        disabled={constraint.markedForDrop || !constraint.isNew}
+                        on:change={(event) => handleConstraintTypeChange(constraint, event)}
+                      >
+                        <option value="index">Index</option>
+                        <option value="uniqueIndex">Unique index</option>
+                        <option value="foreignKey">Foreign key</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={constraint.columns.join(', ')}
+                        disabled={constraint.markedForDrop}
+                        class:has-error={constraint.errors.some((error) => error.includes('column'))}
+                        placeholder="column_a, column_b"
+                        on:input={(event) => handleConstraintColumnsInput(constraint, event)}
+                      >
+                    </td>
+                    <td>
+                      {#if constraint.type === 'foreignKey'}
+                        <div class="fk-reference-group">
+                          <input
+                            type="text"
+                            value={constraint.referencedSchema ?? ''}
+                            disabled={constraint.markedForDrop}
+                            placeholder="schema"
+                            on:input={(event) => handleConstraintReferencedSchemaInput(constraint, event)}
+                          >
+                          <input
+                            type="text"
+                            value={constraint.referencedTable ?? ''}
+                            disabled={constraint.markedForDrop}
+                            placeholder="table"
+                            on:input={(event) => handleConstraintReferencedTableInput(constraint, event)}
+                          >
+                          <input
+                            type="text"
+                            value={constraint.referencedColumns.join(', ')}
+                            disabled={constraint.markedForDrop}
+                            placeholder="id"
+                            on:input={(event) => handleConstraintReferencedColumnsInput(constraint, event)}
+                          >
+                        </div>
+                      {:else}
+                        <span class="hint">n/a</span>
+                      {/if}
+                    </td>
+                    <td>
+                      {#if constraint.type === 'index'}
+                        <select
+                          value={constraint.method ?? 'btree'}
+                          disabled={constraint.markedForDrop}
+                          on:change={(event) => handleConstraintMethodChange(constraint, event)}
+                        >
+                          {#each indexMethodOptions as method}
+                            <option value={method}>{method}</option>
+                          {/each}
+                        </select>
+                      {:else}
+                        <span class="hint">n/a</span>
+                      {/if}
+                    </td>
+                    <td>
+                      {#if constraint.type === 'foreignKey'}
+                        <select
+                          value={constraint.onUpdate ?? 'NO ACTION'}
+                          disabled={constraint.markedForDrop}
+                          on:change={(event) => handleConstraintOnUpdateChange(constraint, event)}
+                        >
+                          {#each FK_ACTIONS as action}
+                            <option value={action}>{action}</option>
+                          {/each}
+                        </select>
+                      {:else}
+                        <span class="hint">n/a</span>
+                      {/if}
+                    </td>
+                    <td>
+                      {#if constraint.type === 'foreignKey'}
+                        <select
+                          value={constraint.onDelete ?? 'NO ACTION'}
+                          disabled={constraint.markedForDrop}
+                          on:change={(event) => handleConstraintOnDeleteChange(constraint, event)}
+                        >
+                          {#each FK_ACTIONS as action}
+                            <option value={action}>{action}</option>
+                          {/each}
+                        </select>
+                      {:else}
+                        <span class="hint">n/a</span>
+                      {/if}
+                    </td>
+                    <td class="actions">
+                      <button
+                        type="button"
+                        class={`ps-btn ${constraint.isNew ? 'ps-btn--ghost' : 'ps-btn--danger'}`}
+                        on:click={() => toggleConstraintDrop(constraint)}
+                      >
+                        {constraint.isNew ? 'Remove' : constraint.markedForDrop ? 'Restore' : 'Drop'}
+                      </button>
+                      {#if constraint.errors.length > 0}
+                        <ul class="cell-errors">
+                          {#each constraint.errors as error}
+                            <li>{error}</li>
+                          {/each}
+                        </ul>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              {/if}
+            </tbody>
+          </table>
+        </section>
       </div>
       <aside class="designer-sidebar">
         <div class="preview-card">
@@ -683,6 +1103,61 @@
     border-radius: var(--ps-radius-lg);
     border: 1px solid var(--ps-border);
     background: var(--ps-surface);
+  }
+
+  .constraint-section {
+    padding: var(--ps-spacing-md);
+    border-top: 1px solid var(--ps-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ps-spacing-sm);
+  }
+
+  .constraint-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ps-spacing-sm);
+    flex-wrap: wrap;
+  }
+
+  .constraint-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ps-spacing-2xs);
+  }
+
+  .constraint-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-spacing-2xs);
+    flex-wrap: wrap;
+  }
+
+  .constraint-table {
+    width: 100%;
+  }
+
+  .fk-reference-group {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ps-spacing-2xs);
+  }
+
+  .help-tip {
+    display: inline-flex;
+    width: 1rem;
+    height: 1rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid var(--ps-border);
+    background: var(--ps-surface-elevated);
+    color: var(--ps-text-secondary);
+    font-size: 0.7rem;
+    cursor: help;
   }
 
   table {
@@ -862,6 +1337,10 @@
 
     .designer-sidebar {
       order: -1;
+    }
+
+    .fk-reference-group {
+      grid-template-columns: 1fr;
     }
   }
 </style>
