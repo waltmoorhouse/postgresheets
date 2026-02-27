@@ -174,4 +174,23 @@ describe('Schema Designer - CREATE TABLE', () => {
         const createStmt = result.statements.find((s: string) => s.includes('CREATE TABLE'));
         expect(createStmt).toContain("DEFAULT 'pending'");
     });
+
+    test('includes constraint statements when provided', () => {
+        const columns = [
+            { name: 'id', type: 'INTEGER', nullable: false, defaultValue: null, comment: null, isPrimaryKey: true }
+        ];
+        const constraints = [
+            { name: 'test_idx', type: 'index', columns: ['id'], method: 'btree' },
+            { name: 'test_uniq', type: 'uniqueIndex', columns: ['id'] },
+            { name: 'test_fk', type: 'foreignKey', columns: ['id'], referencedSchema: 'public', referencedTable: 'other', referencedColumns: ['ref'], onUpdate: 'CASCADE', onDelete: 'NO ACTION' }
+        ];
+
+        const result = buildCreateTableStatements('public', 'foo', columns as any, constraints as any);
+        const sql = result.statements.join(' ');
+
+        expect(sql).toMatch(/CREATE INDEX .*"test_idx"/);
+        // when method is not provided, unique indexes are created as ALTER TABLE ADD CONSTRAINT
+        expect(sql).toMatch(/ADD CONSTRAINT .*"test_uniq" UNIQUE/);
+        expect(sql).toMatch(/ADD CONSTRAINT .*"test_fk" FOREIGN KEY/);
+    });
 });

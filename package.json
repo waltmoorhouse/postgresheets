@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "3.2.6",
+  "version": "3.4.0",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -18,6 +18,20 @@
   "activationEvents": [],
   "main": "./dist/index.js",
   "contributes": {
+    "languages": [
+      {
+        "id": "postgresql",
+        "aliases": [
+          "PostgreSQL",
+          "postgresql",
+          "SQL (PostgreSQL)"
+        ],
+        "extensions": [
+          ".psql",
+          ".pgsql"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "postgres-editor.addConnection",
@@ -128,6 +142,30 @@
         "category": "PostgreSQL"
       },
       {
+        "command": "postgres-editor.newSqlFile",
+        "title": "New PostgreSQL File",
+        "icon": "$(file)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.runSqlFile",
+        "title": "Run SQL File",
+        "icon": "$(play)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.runSqlSelection",
+        "title": "Run SQL Selection",
+        "icon": "$(play)",
+        "category": "PostgreSQL"
+      },
+      {
+        "command": "postgres-editor.selectSqlDocumentConnection",
+        "title": "Select SQL Connection",
+        "icon": "$(plug)",
+        "category": "PostgreSQL"
+      },
+      {
         "command": "postgres-editor.viewQueryHistory",
         "title": "View Query History",
         "icon": "$(history)",
@@ -208,6 +246,35 @@
         {
           "command": "postgres-editor.refreshQueryHistory",
           "when": "view == postgresQueryHistory",
+          "group": "navigation"
+        }
+      ],
+      "menubar/file": [
+        {
+          "command": "postgres-editor.newSqlFile",
+          "group": "sql"
+        }
+      ],
+      "file/newFile": [
+        {
+          "command": "postgres-editor.newSqlFile",
+          "group": "sql"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "postgres-editor.selectSqlDocumentConnection",
+          "when": "resourceLangId == sql || resourceLangId == postgresql",
+          "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.runSqlSelection",
+          "when": "(resourceLangId == sql || resourceLangId == postgresql) && editorHasSelection",
+          "group": "navigation"
+        },
+        {
+          "command": "postgres-editor.runSqlFile",
+          "when": "resourceLangId == sql || resourceLangId == postgresql",
           "group": "navigation"
         }
       ],

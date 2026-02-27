@@ -322,19 +322,70 @@ export class SqlTerminalProvider {
             },
 
             handleInput: async (data: string) => {
-                // We may receive multi-byte sequences. Use parser to assemble them.
-                const seq = escapeParser.addChar(data);
-                if (seq === null) return; // still buffering
+                // Handle pasted data (which may be multiple characters including newlines) by iterating
+                // through each character and letting the escape parser assemble sequences. This ensures
+                // multi-line paste works correctly instead of being ignored when `data` contains >1 char.
+                for (let i = 0; i < data.length; i++) {
+                    const ch = data[i];
+                    const seq = escapeParser.addChar(ch);
+                    if (seq === null) continue; // still buffering an escape sequence
 
-                const promptStr = `\x1b[32m${selectedConnection!.username}@${selectedConnection!.name}/${selectedConnection!.database}/${schema}\x1b[0m > `;
-                const multiPrompt = `\x1b[32m${selectedConnection!.username}@${selectedConnection!.name}/${selectedConnection!.database}/${schema}\x1b[0m .. `;
+                    const promptStr = `\x1b[32m${selectedConnection!.username}@${selectedConnection!.name}/${selectedConnection!.database}/${schema}\x1b[0m > `;
+                    const multiPrompt = `\x1b[32m${selectedConnection!.username}@${selectedConnection!.name}/${selectedConnection!.database}/${schema}\x1b[0m .. `;
 
-                // Fallback simple mode (if editing fails)
-                if (simpleMode) {
-                    // Enter
-                    if (seq === '\r') {
+                    // Fallback simple mode (if editing fails)
+                    if (simpleMode) {
+                        // ENTER (treat \n like Enter too)
+                        if (seq === '\r' || seq === '\n') {
+                            writeEmitter.fire('\r\n');
+                            const line = simpleCurrentLine;
+
+                            if (line.trim() === '\\q' || line.trim() === 'exit' || line.trim() === 'quit') {
+                                writeEmitter.fire('Bye!\r\n');
+                                closeEmitter.fire(0);
+                                return;
+                            }
+
+                            commandBuffer += line + ' ';
+
+                            if (line.trim().endsWith(';')) {
+                                const sql = commandBuffer.trim();
+                                await this.executeQuery(
+                                    writeEmitter,
+                                    selectedConnection!.id,
+                                    selectedConnection!.name,
+                                    selectedConnection!.database,
+                                    schema,
+                                    sql
+                                );
+                                commandBuffer = '';
+                                inMultiLine = false;
+                                historyNavigator.reset();
+                                writeEmitter.fire(promptStr);
+                            } else {
+                                inMultiLine = true;
+                                writeEmitter.fire(multiPrompt);
+                            }
+
+                            simpleCurrentLine = '';
+                        } else if (seq === '\x7f') {
+                            if (simpleCurrentLine.length > 0) {
+                                simpleCurrentLine = simpleCurrentLine.slice(0, -1);
+                                writeEmitter.fire('\b \b');
+                            }
+                        } else if (seq.length === 1 && seq >= ' ') {
+                            // printable
+                            simpleCurrentLine += seq;
+                            writeEmitter.fire(seq);
+                        }
+
+                        continue;
+                    }
+
+                    // ENTER (treat \n like Enter too)
+                    if (seq === '\r' || seq === '\n') {
                         writeEmitter.fire('\r\n');
-                        const line = simpleCurrentLine;
+                        const line = lineEditor.getLine();
 
                         if (line.trim() === '\\q' || line.trim() === 'exit' || line.trim() === 'quit') {
                             writeEmitter.fire('Bye!\r\n');
@@ -363,135 +414,89 @@ export class SqlTerminalProvider {
                             writeEmitter.fire(multiPrompt);
                         }
 
-                        simpleCurrentLine = '';
-                    } else if (seq === '\x7f') {
-                        if (simpleCurrentLine.length > 0) {
-                            simpleCurrentLine = simpleCurrentLine.slice(0, -1);
-                            writeEmitter.fire('\b \b');
+                        lineEditor.clear();
+                    }
+                    // Backspace
+                    else if (seq === '\x7f') {
+                        lineEditor.backspace();
+                        redrawLine();
+                    }
+                    // Delete key
+                    else if (seq === '\x1b[3~') {
+                        lineEditor.deleteChar();
+                        redrawLine();
+                    }
+                    // Left/Right arrows
+                    else if (seq === '\x1b[D') {
+                        lineEditor.moveCursor(-1);
+                        redrawLine();
+                    }
+                    else if (seq === '\x1b[C') {
+                        lineEditor.moveCursor(1);
+                        redrawLine();
+                    }
+                    // Up/Down arrows -> history navigation
+                    else if (seq === '\x1b[A') {
+                        const prev = historyNavigator.navigateUp(lineEditor.getLine());
+                        if (prev !== null) {
+                            lineEditor.setLine(prev, true);
+                            redrawLine();
                         }
-                    } else if (seq.length === 1 && seq >= ' ') {
-                        // printable
-                        simpleCurrentLine += seq;
-                        writeEmitter.fire(seq);
                     }
-
-                    return;
-                }
-
-                // ENTER
-                if (seq === '\r') {
-                    writeEmitter.fire('\r\n');
-                    const line = lineEditor.getLine();
-
-                    if (line.trim() === '\\q' || line.trim() === 'exit' || line.trim() === 'quit') {
-                        writeEmitter.fire('Bye!\r\n');
-                        closeEmitter.fire(0);
-                        return;
+                    else if (seq === '\x1b[B') {
+                        const next = historyNavigator.navigateDown();
+                        if (next !== null) {
+                            lineEditor.setLine(next, true);
+                            redrawLine();
+                        }
                     }
-
-                    commandBuffer += line + ' ';
-
-                    if (line.trim().endsWith(';')) {
-                        const sql = commandBuffer.trim();
-                        await this.executeQuery(
-                            writeEmitter,
-                            selectedConnection!.id,
-                            selectedConnection!.name,
-                            selectedConnection!.database,
-                            schema,
-                            sql
-                        );
+                    // Ctrl+C - cancel
+                    else if (seq === '\x03') {
+                        writeEmitter.fire('^C\r\n');
+                        lineEditor.clear();
                         commandBuffer = '';
                         inMultiLine = false;
-                        historyNavigator.reset();
+                        escapeParser.reset();
                         writeEmitter.fire(promptStr);
-                    } else {
-                        inMultiLine = true;
-                        writeEmitter.fire(multiPrompt);
                     }
-
-                    lineEditor.clear();
-                }
-                // Backspace
-                else if (seq === '\x7f') {
-                    lineEditor.backspace();
-                    redrawLine();
-                }
-                // Delete key
-                else if (seq === '\x1b[3~') {
-                    lineEditor.deleteChar();
-                    redrawLine();
-                }
-                // Left/Right arrows
-                else if (seq === '\x1b[D') {
-                    lineEditor.moveCursor(-1);
-                    redrawLine();
-                }
-                else if (seq === '\x1b[C') {
-                    lineEditor.moveCursor(1);
-                    redrawLine();
-                }
-                // Up/Down arrows -> history navigation
-                else if (seq === '\x1b[A') {
-                    const prev = historyNavigator.navigateUp(lineEditor.getLine());
-                    if (prev !== null) {
-                        lineEditor.setLine(prev, true);
+                    // Ctrl+A / Ctrl+E
+                    else if (seq === '\x01') {
+                        lineEditor.moveCursorToStart();
                         redrawLine();
                     }
-                }
-                else if (seq === '\x1b[B') {
-                    const next = historyNavigator.navigateDown();
-                    if (next !== null) {
-                        lineEditor.setLine(next, true);
+                    else if (seq === '\x05') {
+                        lineEditor.moveCursorToEnd();
                         redrawLine();
                     }
-                }
-                // Ctrl+C - cancel
-                else if (seq === '\x03') {
-                    writeEmitter.fire('^C\r\n');
-                    lineEditor.clear();
-                    commandBuffer = '';
-                    inMultiLine = false;
-                    escapeParser.reset();
-                    writeEmitter.fire(promptStr);
-                }
-                // Ctrl+A / Ctrl+E
-                else if (seq === '\x01') {
-                    lineEditor.moveCursorToStart();
-                    redrawLine();
-                }
-                else if (seq === '\x05') {
-                    lineEditor.moveCursorToEnd();
-                    redrawLine();
-                }
-                // Alt+Left / Alt+B (word back)
-                else if (seq === '\x1b[1;3D' || seq === '\x1bb') {
-                    lineEditor.moveWordBackward();
-                    redrawLine();
-                }
-                // Alt+Right / Alt+F (word forward)
-                else if (seq === '\x1b[1;3C' || seq === '\x1bf') {
-                    lineEditor.moveWordForward();
-                    redrawLine();
-                }
-                // Printable char
-                else if (seq.length === 1 && seq >= ' ') {
-                    try {
-                        const ok = lineEditor.insertChar(seq);
-                        if (!ok) {
-                            // Reached max line length
-                            writeEmitter.fire('\r\n\x1b[33mWarning: line length limit reached (max ' + MAX_LINE_LENGTH + ' chars).\x1b[0m\r\n');
+                    // Alt+Left / Alt+B (word back)
+                    else if (seq === '\x1b[1;3D' || seq === '\x1bb') {
+                        lineEditor.moveWordBackward();
+                        redrawLine();
+                    }
+                    // Alt+Right / Alt+F (word forward)
+                    else if (seq === '\x1b[1;3C' || seq === '\x1bf') {
+                        lineEditor.moveWordForward();
+                        redrawLine();
+                    }
+                    // Printable char
+                    else if (seq.length === 1 && seq >= ' ') {
+                        try {
+                            const ok = lineEditor.insertChar(seq);
+                            if (!ok) {
+                                // Reached max line length
+                                writeEmitter.fire('\r\n\x1b[33mWarning: line length limit reached (max ' + MAX_LINE_LENGTH + ' chars).\x1b[0m\r\n');
+                            }
+                            redrawLine();
+                        } catch (err) {
+                            // Fallback to simple mode
+                            simpleMode = true;
+                            writeEmitter.fire('\r\n\x1b[31mLine editing failed, falling back to simple input mode.\x1b[0m\r\n');
                         }
-                        redrawLine();
-                    } catch (err) {
-                        // Fallback to simple mode
-                        simpleMode = true;
-                        writeEmitter.fire('\r\n\x1b[31mLine editing failed, falling back to simple input mode.\x1b[0m\r\n');
                     }
-                }
-                // Unknown / pass-through
-                else {
-                    // ignore
+                    // Unknown / pass-through
+                    else {
+                        // ignore
+                    }
                 }
             }
         };
@@ -623,4 +628,60 @@ export class SqlTerminalProvider {
             writeEmitter.fire(`\x1b[90m(${executionTime}ms)\x1b[0m\r\n`);
         }
     }
+
+    /**
+     * Execute SQL and return raw results (no terminal output). Logs to query history and
+     * triggers query history refresh. Returns the `pg` result and executionTime.
+     */
+    public async executeSqlSilent(
+        connectionId: string,
+        database: string,
+        schema: string,
+        sql: string
+    ): Promise<{ result?: any; executionTime: number; error?: string }> {
+        const startTime = Date.now();
+        try {
+            let client = await this.connectionManager.getClient(connectionId);
+            if (!client) {
+                // Try to connect if not already connected
+                client = await this.connectionManager.connect(connectionId);
+                if (!client) {
+                    return { executionTime: Date.now() - startTime, error: 'Not connected' };
+                }
+            }
+
+            await client.query(`SET search_path TO "${schema}", public`);
+
+            if (sql.length > MAX_LINE_LENGTH) {
+                // Keep the same warning behavior as the terminal (but don't write to Terminal)
+                console.warn(`Warning: executing very large SQL (${Math.round(sql.length/1024)} KB).`);
+            }
+
+            const result = await client.query(sql);
+            const executionTime = Date.now() - startTime;
+
+            // Add to query history
+            try {
+                const connections = await this.connectionManager.getConnections();
+                const conn = connections.find(c => c.id === connectionId);
+                const connectionName = conn ? conn.name : '';
+                const databaseName = conn ? conn.database : database;
+                await this.queryHistory.addQuery(sql, connectionId, connectionName, databaseName, executionTime);
+                try {
+                    await vscode.commands.executeCommand('postgres-editor.refreshQueryHistory');
+                } catch (e) {
+                    console.log('[SqlTerminal] Failed to refresh query history view:', e);
+                }
+            } catch (e) {
+                // swallow history errors
+                console.log('[SqlTerminal] Failed to add query to history', e);
+            }
+
+            return { result, executionTime };
+        } catch (err) {
+            const executionTime = Date.now() - startTime;
+            return { executionTime, error: err instanceof Error ? err.message : String(err) };
+        }
+    }
 }
+
