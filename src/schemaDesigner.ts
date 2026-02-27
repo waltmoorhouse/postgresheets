@@ -378,13 +378,51 @@ export class SchemaDesigner {
 
             const constraints: SchemaDesignerConstraintState[] = [];
 
+            const normalizeConstraintColumns = (values: unknown): string[] => {
+                const normalizeEntries = (entries: unknown[]): string[] => entries
+                    .map(entry => String(entry ?? '').trim())
+                    .filter(entry => entry.length > 0);
+
+                if (Array.isArray(values)) {
+                    return normalizeEntries(values);
+                }
+
+                if (typeof values === 'string') {
+                    const trimmed = values.trim();
+                    if (trimmed.length === 0) {
+                        return [];
+                    }
+
+                    // Support postgres text[] literal fallback, e.g. {id,name}
+                    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                        const inner = trimmed.slice(1, -1);
+                        if (inner.length === 0) {
+                            return [];
+                        }
+
+                        return inner
+                            .split(',')
+                            .map(part => part.trim().replace(/^"|"$/g, ''))
+                            .filter(part => part.length > 0);
+                    }
+
+                    return [trimmed];
+                }
+
+                return [];
+            };
+
             for (const row of uniqueConstraintResult.rows) {
+                const columns = normalizeConstraintColumns(row.columns);
+                if (columns.length === 0) {
+                    continue;
+                }
                 constraints.push({
                     id: `uk-${String(row.conname)}`,
                     name: String(row.conname),
                     originalName: String(row.conname),
                     type: 'uniqueIndex',
-                    columns: Array.isArray(row.columns) ? row.columns.map((value: unknown) => String(value)) : [],
+                    columns,
                     referencedSchema: null,
                     referencedTable: null,
                     referencedColumns: [],
@@ -397,12 +435,16 @@ export class SchemaDesigner {
             }
 
             for (const row of indexResult.rows) {
+                const columns = normalizeConstraintColumns(row.columns);
+                if (columns.length === 0) {
+                    continue;
+                }
                 constraints.push({
                     id: `idx-${String(row.index_name)}`,
                     name: String(row.index_name),
                     originalName: String(row.index_name),
                     type: Boolean(row.is_unique) ? 'uniqueIndex' : 'index',
-                    columns: Array.isArray(row.columns) ? row.columns.map((value: unknown) => String(value)) : [],
+                    columns,
                     referencedSchema: null,
                     referencedTable: null,
                     referencedColumns: [],
@@ -415,17 +457,20 @@ export class SchemaDesigner {
             }
 
             for (const row of foreignKeyResult.rows) {
+                const columns = normalizeConstraintColumns(row.columns);
+                const referencedColumns = normalizeConstraintColumns(row.referenced_columns);
+                if (columns.length === 0 || referencedColumns.length === 0) {
+                    continue;
+                }
                 constraints.push({
                     id: `fk-${String(row.conname)}`,
                     name: String(row.conname),
                     originalName: String(row.conname),
                     type: 'foreignKey',
-                    columns: Array.isArray(row.columns) ? row.columns.map((value: unknown) => String(value)) : [],
+                    columns,
                     referencedSchema: row.referenced_schema ? String(row.referenced_schema) : null,
                     referencedTable: row.referenced_table ? String(row.referenced_table) : null,
-                    referencedColumns: Array.isArray(row.referenced_columns)
-                        ? row.referenced_columns.map((value: unknown) => String(value))
-                        : [],
+                    referencedColumns,
                     onUpdate: this.decodeForeignKeyAction(row.confupdtype),
                     onDelete: this.decodeForeignKeyAction(row.confdeltype),
                     method: null,

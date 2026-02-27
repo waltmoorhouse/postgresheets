@@ -6,9 +6,27 @@ import { SqlEditorResultView } from './sqlEditorResultView';
 
 const DOC_CONN_KEY = 'sqlDocumentConnections';
 
+const isSqlLikeLanguage = (languageId: string): boolean => languageId === 'sql' || languageId === 'postgresql';
+
+interface SqlStatementSegment {
+    sql: string;
+    startLine: number;
+    endLine: number;
+}
+
+interface StatementExecutionStatus {
+    successLines: number[];
+    failedLines: number[];
+    skippedLines: number[];
+}
+
 export class SqlEditor {
     private statusBarItem: vscode.StatusBarItem;
     private resultView: SqlEditorResultView;
+    private successDecorationType: vscode.TextEditorDecorationType;
+    private failedDecorationType: vscode.TextEditorDecorationType;
+    private skippedDecorationType: vscode.TextEditorDecorationType;
+    private statementStatusByDocUri = new Map<string, StatementExecutionStatus>();
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -26,13 +44,45 @@ export class SqlEditor {
         }
 
         this.resultView = new SqlEditorResultView(context);
+        const asFileUri = (relativePath: string): vscode.Uri | undefined => {
+            if ((context as any).extensionUri && vscode.Uri && typeof (vscode.Uri as any).joinPath === 'function') {
+                return (vscode.Uri as any).joinPath((context as any).extensionUri, ...relativePath.split('/'));
+            }
+            const absolutePath = context.asAbsolutePath(relativePath);
+            if (vscode.Uri && typeof vscode.Uri.file === 'function') {
+                return vscode.Uri.file(absolutePath);
+            }
+            return undefined;
+        };
+        const createDecoration = (iconPath: string, symbol: string, color: string): vscode.TextEditorDecorationType => {
+            if (vscode.window && typeof (vscode.window as any).createTextEditorDecorationType === 'function') {
+                return (vscode.window as any).createTextEditorDecorationType({
+                    gutterIconPath: asFileUri(iconPath),
+                    gutterIconSize: 'contain',
+                    isWholeLine: true,
+                    before: {
+                        contentText: symbol,
+                        color,
+                        margin: '0 10px 0 0'
+                    }
+                });
+            }
+            return { dispose: () => {} } as vscode.TextEditorDecorationType;
+        };
+
+        this.successDecorationType = createDecoration('media/sql-status-success.svg', '✓', '#2EA043');
+        this.failedDecorationType = createDecoration('media/sql-status-failed.svg', '✗', '#D73A49');
+        this.skippedDecorationType = createDecoration('media/sql-status-skipped.svg', '●', '#9AA0A6');
+        context.subscriptions.push(this.successDecorationType, this.failedDecorationType, this.skippedDecorationType);
 
         // Register providers and commands (guarded for test environment)
         if (vscode.languages && typeof vscode.languages.registerCodeLensProvider === 'function') {
             context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'sql' }, new SqlCodeLensProvider(this)));
+            context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'postgresql' }, new SqlCodeLensProvider(this)));
         }
         if (vscode.languages && typeof vscode.languages.registerCompletionItemProvider === 'function') {
             context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'sql' }, new SqlCompletionProvider(this), '.', '"'));
+            context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'postgresql' }, new SqlCompletionProvider(this), '.', '"'));
         }
 
         if (vscode.commands && typeof vscode.commands.registerCommand === 'function') {
@@ -40,7 +90,10 @@ export class SqlEditor {
                 vscode.commands.registerCommand('postgres-editor.runSqlFile', async () => { await this.runSqlFile(); }),
                 vscode.commands.registerCommand('postgres-editor.runSqlSelection', async () => { await this.runSqlSelection(); }),
                 vscode.commands.registerCommand('postgres-editor.selectSqlDocumentConnection', async () => { await this.selectDocumentConnection(); }),
-                vscode.commands.registerCommand('postgres-editor.newSqlFile', async () => { await vscode.commands.executeCommand('workbench.action.files.newUntitledFile', { language: 'sql' }); })
+                vscode.commands.registerCommand('postgres-editor.newSqlFile', async () => {
+                    const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+                    await vscode.window.showTextDocument(doc, { preview: false });
+                })
             );
         } else {
             // In test environments without command registration, provide no-op placeholders
@@ -49,13 +102,17 @@ export class SqlEditor {
 
         // Update status bar on active editor change
         if (vscode.window && typeof (vscode.window as any).onDidChangeActiveTextEditor === 'function') {
-            context.subscriptions.push((vscode.window as any).onDidChangeActiveTextEditor(() => this.updateStatusBar()));
+            context.subscriptions.push((vscode.window as any).onDidChangeActiveTextEditor(() => {
+                this.updateStatusBar();
+                this.applyStoredDecorationsForActiveEditor();
+            }));
         }
         if (vscode.workspace && typeof (vscode.workspace as any).onDidCloseTextDocument === 'function') {
             context.subscriptions.push((vscode.workspace as any).onDidCloseTextDocument((doc: vscode.TextDocument) => this.onDocumentClosed(doc)));
         }
 
         this.updateStatusBar();
+        this.applyStoredDecorationsForActiveEditor();
     }
 
     private getDocumentKey(doc: vscode.TextDocument) {
@@ -66,6 +123,17 @@ export class SqlEditor {
         const key = this.getDocumentKey(doc);
         const val = this.context.workspaceState.get<{ connectionId?: string; schema?: string }>(key);
         return val || {};
+    }
+
+    async getConnectionLabelForDocument(doc: vscode.TextDocument): Promise<string> {
+        const mapping = this.getSavedConnectionForDocument(doc);
+        if (!mapping.connectionId) {
+            return 'Connection: (Choose)';
+        }
+
+        const configs = await this.connectionManager.getConnections();
+        const cfg = configs.find(c => c.id === mapping.connectionId);
+        return `Connection: ${cfg?.name || mapping.connectionId}`;
     }
 
     async setConnectionForDocument(doc: vscode.TextDocument, connectionId: string, schema: string = 'public') {
@@ -92,7 +160,7 @@ export class SqlEditor {
 
     private updateStatusBar() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.languageId !== 'sql') {
+        if (!editor || !isSqlLikeLanguage(editor.document.languageId)) {
             this.statusBarItem.hide();
             return;
         }
@@ -114,7 +182,7 @@ export class SqlEditor {
 
     async selectDocumentConnection() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.languageId !== 'sql') {
+        if (!editor || !isSqlLikeLanguage(editor.document.languageId)) {
             vscode.window.showErrorMessage('Open an SQL document first');
             return;
         }
@@ -138,23 +206,25 @@ export class SqlEditor {
 
     async runSqlSelection() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.languageId !== 'sql') {
+        if (!editor || !isSqlLikeLanguage(editor.document.languageId)) {
             vscode.window.showErrorMessage('Open an SQL document first');
             return;
         }
 
-        const sql = editor.document.getText(editor.selection) || editor.document.getText();
+        const hasSelection = !editor.selection.isEmpty;
+        const sql = hasSelection ? editor.document.getText(editor.selection) : editor.document.getText();
         if (!sql || sql.trim().length === 0) {
             vscode.window.showErrorMessage('No SQL selected or in document');
             return;
         }
 
-        await this.runSqlForDocument(editor.document, sql);
+        const baseLine = hasSelection ? editor.selection.start.line : 0;
+        await this.runSqlForDocument(editor.document, sql, baseLine);
     }
 
     async runSqlFile() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.languageId !== 'sql') {
+        if (!editor || !isSqlLikeLanguage(editor.document.languageId)) {
             vscode.window.showErrorMessage('Open an SQL document first');
             return;
         }
@@ -165,10 +235,191 @@ export class SqlEditor {
             return;
         }
 
-        await this.runSqlForDocument(editor.document, sql);
+        await this.runSqlForDocument(editor.document, sql, 0);
     }
 
-    private async runSqlForDocument(doc: vscode.TextDocument, sql: string) {
+    private getLineFromOffset(text: string, offset: number, baseLine: number): number {
+        let line = baseLine;
+        for (let i = 0; i < offset && i < text.length; i++) {
+            if (text[i] === '\n') {
+                line++;
+            }
+        }
+        return line;
+    }
+
+    private splitSqlStatementsWithRanges(sqlText: string, baseLine: number): SqlStatementSegment[] {
+        const statements: SqlStatementSegment[] = [];
+        let segmentStart = 0;
+        let inSingleQuote = false;
+        let inDoubleQuote = false;
+        let inLineComment = false;
+        let inBlockComment = false;
+        let dollarTag: string | null = null;
+
+        const pushSegment = (segmentEnd: number) => {
+            const raw = sqlText.slice(segmentStart, segmentEnd);
+            if (!raw.trim()) {
+                segmentStart = segmentEnd;
+                return;
+            }
+
+            const firstRelative = raw.search(/\S/);
+            let lastRelative = raw.length - 1;
+            while (lastRelative >= 0 && /\s/.test(raw[lastRelative])) {
+                lastRelative--;
+            }
+
+            if (firstRelative === -1 || lastRelative < 0) {
+                segmentStart = segmentEnd;
+                return;
+            }
+
+            const firstOffset = segmentStart + firstRelative;
+            const lastOffset = segmentStart + lastRelative;
+            statements.push({
+                sql: raw.trim(),
+                startLine: this.getLineFromOffset(sqlText, firstOffset, baseLine),
+                endLine: this.getLineFromOffset(sqlText, lastOffset, baseLine)
+            });
+
+            segmentStart = segmentEnd;
+        };
+
+        for (let i = 0; i < sqlText.length; i++) {
+            const ch = sqlText[i];
+            const next = i + 1 < sqlText.length ? sqlText[i + 1] : '';
+
+            if (inLineComment) {
+                if (ch === '\n') {
+                    inLineComment = false;
+                }
+                continue;
+            }
+
+            if (inBlockComment) {
+                if (ch === '*' && next === '/') {
+                    inBlockComment = false;
+                    i++;
+                }
+                continue;
+            }
+
+            if (dollarTag) {
+                const candidate = sqlText.slice(i, i + dollarTag.length);
+                if (candidate === dollarTag) {
+                    dollarTag = null;
+                    i += dollarTag ? 0 : candidate.length - 1;
+                }
+                continue;
+            }
+
+            if (inSingleQuote) {
+                if (ch === '\'' && next === '\'') {
+                    i++;
+                    continue;
+                }
+                if (ch === '\'') {
+                    inSingleQuote = false;
+                }
+                continue;
+            }
+
+            if (inDoubleQuote) {
+                if (ch === '"' && next === '"') {
+                    i++;
+                    continue;
+                }
+                if (ch === '"') {
+                    inDoubleQuote = false;
+                }
+                continue;
+            }
+
+            if (ch === '-' && next === '-') {
+                inLineComment = true;
+                i++;
+                continue;
+            }
+
+            if (ch === '/' && next === '*') {
+                inBlockComment = true;
+                i++;
+                continue;
+            }
+
+            if (ch === '\'') {
+                inSingleQuote = true;
+                continue;
+            }
+
+            if (ch === '"') {
+                inDoubleQuote = true;
+                continue;
+            }
+
+            if (ch === '$') {
+                const m = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(sqlText.slice(i));
+                if (m) {
+                    dollarTag = m[0];
+                    i += m[0].length - 1;
+                    continue;
+                }
+            }
+
+            if (ch === ';') {
+                pushSegment(i + 1);
+            }
+        }
+
+        if (segmentStart < sqlText.length) {
+            pushSegment(sqlText.length);
+        }
+
+        return statements;
+    }
+
+    private applyStatementDecorations(doc: vscode.TextDocument, status: StatementExecutionStatus): void {
+        this.statementStatusByDocUri.set(doc.uri.toString(), status);
+
+        const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === doc.uri.toString());
+        if (!editor) {
+            return;
+        }
+
+        const toRanges = (lines: number[]) => lines.map(line => {
+            const lineText = editor.document.lineAt(line);
+            return new vscode.Range(new vscode.Position(line, 0), new vscode.Position(line, lineText.text.length));
+        });
+        editor.setDecorations(this.successDecorationType, toRanges(status.successLines));
+        editor.setDecorations(this.failedDecorationType, toRanges(status.failedLines));
+        editor.setDecorations(this.skippedDecorationType, toRanges(status.skippedLines));
+    }
+
+    private applyStoredDecorationsForActiveEditor(): void {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || !isSqlLikeLanguage(editor.document.languageId)) {
+            return;
+        }
+
+        const status = this.statementStatusByDocUri.get(editor.document.uri.toString());
+        if (!status) {
+            editor.setDecorations(this.successDecorationType, []);
+            editor.setDecorations(this.failedDecorationType, []);
+            editor.setDecorations(this.skippedDecorationType, []);
+            return;
+        }
+
+        const toRanges = (lines: number[]) => lines.map(line => {
+            const lineText = editor.document.lineAt(line);
+            return new vscode.Range(new vscode.Position(line, 0), new vscode.Position(line, lineText.text.length));
+        });
+        editor.setDecorations(this.successDecorationType, toRanges(status.successLines));
+        editor.setDecorations(this.failedDecorationType, toRanges(status.failedLines));
+        editor.setDecorations(this.skippedDecorationType, toRanges(status.skippedLines));
+    }
+
+    private async runSqlForDocument(doc: vscode.TextDocument, sql: string, baseLine: number) {
         let mapping = this.getSavedConnectionForDocument(doc);
         if (!mapping.connectionId) {
             // Prompt user to select connection
@@ -186,22 +437,66 @@ export class SqlEditor {
             await this.setConnectionForDocument(doc, mapping.connectionId!, mapping.schema || 'public');
         }
 
-        // Execute using SqlTerminalProvider's silent method
+        // Execute statements sequentially so we can mark per-statement status in the gutter.
         const conn = await this.connectionManager.getConnections();
         const cfg = conn.find(c => c.id === mapping.connectionId);
         const databaseName = cfg ? cfg.database : '';
 
-        const r = await this.sqlTerminalProvider.executeSqlSilent(mapping.connectionId!, databaseName, mapping.schema || 'public', sql);
-        if (r.error) {
-            vscode.window.showErrorMessage(`Failed to execute SQL: ${r.error}`);
+        const statements = this.splitSqlStatementsWithRanges(sql, baseLine);
+        if (statements.length === 0) {
+            vscode.window.showErrorMessage('No SQL statements found to run');
             return;
         }
 
-        // Show results in result view
-        if (r.result && (r.result.command === 'SELECT' || r.result.command === 'SHOW')) {
-            this.resultView.showQueryResult(`SQL Result - ${doc.fileName}`, r.result.rows, Object.keys(r.result.rows[0] || {}));
-        } else {
-            vscode.window.showInformationMessage(`${r.result?.command || 'Executed'} (${r.result?.rowCount ?? 0} rows) (${r.executionTime}ms)`);
+        const status: StatementExecutionStatus = { successLines: [], failedLines: [], skippedLines: [] };
+        const selectResults: Array<{ label: string; rows: any[]; columns: string[] }> = [];
+        let totalExecutionTime = 0;
+        let errorMessage: string | undefined;
+
+        for (let i = 0; i < statements.length; i++) {
+            const statement = statements[i];
+            const r = await this.sqlTerminalProvider.executeSqlSilent(
+                mapping.connectionId!,
+                databaseName,
+                mapping.schema || 'public',
+                statement.sql
+            );
+
+            totalExecutionTime += r.executionTime;
+
+            if (r.error) {
+                status.failedLines.push(statement.startLine);
+                errorMessage = r.error;
+                for (let j = i + 1; j < statements.length; j++) {
+                    status.skippedLines.push(statements[j].startLine);
+                }
+                break;
+            }
+
+            status.successLines.push(statement.startLine);
+            const singleResult = r.result;
+            if (singleResult && (singleResult.command === 'SELECT' || singleResult.command === 'SHOW')) {
+                selectResults.push({
+                    label: `${singleResult.command} (line ${statement.startLine + 1})`,
+                    rows: singleResult.rows || [],
+                    columns: Object.keys((singleResult.rows && singleResult.rows[0]) || {})
+                });
+            }
+        }
+
+        this.applyStatementDecorations(doc, status);
+
+        if (selectResults.length > 0) {
+            this.resultView.showMultipleQueryResults(`SQL Result - ${doc.fileName}`, selectResults);
+        }
+
+        if (errorMessage) {
+            vscode.window.showErrorMessage(`Failed to execute SQL: ${errorMessage}`);
+            return;
+        }
+
+        if (selectResults.length === 0) {
+            vscode.window.showInformationMessage(`Executed ${status.successLines.length} statement(s) (${totalExecutionTime}ms)`);
         }
     }
 
@@ -239,12 +534,11 @@ class SqlCodeLensProvider implements vscode.CodeLensProvider {
     readonly onDidChangeCodeLenses = this.onDidChange.event;
     constructor(private manager: SqlEditor) {}
 
-    provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeLens[]> {
-        if (document.languageId !== 'sql') return [];
+    async provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
+        if (!isSqlLikeLanguage(document.languageId)) return [];
 
         const top = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0));
-        const mapping = this.manager.getSavedConnectionForDocument(document);
-        const connTitle = mapping.connectionId ? `Connection: ${mapping.connectionId}` : 'Connection: (Choose)';
+        const connTitle = await this.manager.getConnectionLabelForDocument(document);
 
         const codelenses: vscode.CodeLens[] = [];
         codelenses.push(new vscode.CodeLens(top, { title: connTitle + ' (Change)', command: 'postgres-editor.selectSqlDocumentConnection' }));
@@ -257,28 +551,82 @@ class SqlCodeLensProvider implements vscode.CodeLensProvider {
 class SqlCompletionProvider implements vscode.CompletionItemProvider {
     constructor(private manager: SqlEditor) {}
 
+    private stripQuotes(identifier: string): string {
+        const trimmed = identifier.trim();
+        if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+            return trimmed.slice(1, -1);
+        }
+        return trimmed;
+    }
+
+    private splitQualifiedName(name: string): { schema?: string; table: string } {
+        const parts = name.split('.').map(p => this.stripQuotes(p));
+        if (parts.length >= 2) {
+            return { schema: parts[parts.length - 2], table: parts[parts.length - 1] };
+        }
+        return { table: parts[0] };
+    }
+
+    private resolveAliasTable(document: vscode.TextDocument, position: vscode.Position, alias: string): { schema?: string; table: string } | null {
+        const fullText = document.getText();
+        const cursorOffset = document.offsetAt(position);
+
+        // Resolve aliases from the current SQL statement (between semicolons),
+        // so completion also works in SELECT list positions before FROM/JOIN.
+        const statementStart = fullText.lastIndexOf(';', Math.max(0, cursorOffset - 1)) + 1;
+        const statementEndIndex = fullText.indexOf(';', cursorOffset);
+        const statementEnd = statementEndIndex === -1 ? fullText.length : statementEndIndex;
+        const statementText = fullText.slice(statementStart, statementEnd);
+
+        // Match FROM/JOIN targets and aliases in the current statement.
+        // Examples:
+        //   FROM public.users u
+        //   FROM "public"."users" AS u
+        //   JOIN users u
+        const aliasRegex = /\b(?:FROM|JOIN)\s+((?:"[^"]+"|[A-Za-z_][\w$]*)(?:\s*\.\s*(?:"[^"]+"|[A-Za-z_][\w$]*))?)\s+(?:AS\s+)?("[^"]+"|[A-Za-z_][\w$]*)/gi;
+
+        let match: RegExpExecArray | null;
+        let resolved: { schema?: string; table: string } | null = null;
+
+        while ((match = aliasRegex.exec(statementText)) !== null) {
+            const tableRef = match[1].replace(/\s+/g, '');
+            const foundAlias = this.stripQuotes(match[2]);
+
+            if (foundAlias.toLowerCase() === alias.toLowerCase()) {
+                resolved = this.splitQualifiedName(tableRef);
+            }
+        }
+
+        return resolved;
+    }
+
     async provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext) {
         const line = document.lineAt(position.line).text.substring(0, position.character);
-        // Look for pattern: [schema.]table.
-        const m = /(?:"([^"]+)"|([A-Za-z0-9_]+))(?:\.(?:"([^"]+)"|([A-Za-z0-9_]+)))?\.$/.exec(line);
+        // Look for pattern: qualifier. where qualifier may be alias/table/schema-qualified table
+        const m = /((?:"[^"]+"|[A-Za-z_][\w$]*)(?:\s*\.\s*(?:"[^"]+"|[A-Za-z_][\w$]*))?)\.$/.exec(line);
         if (!m) {
             return null;
         }
 
-        let schema: string | undefined;
-        let table: string | undefined;
-        if (m[4] || m[3]) {
-            // schema.table.
-            schema = m[1] || m[2];
-            table = m[3] || m[4];
-        } else {
-            table = m[1] || m[2];
-        }
+        const qualifierRaw = m[1].replace(/\s+/g, '');
+        const qualifierParts = this.splitQualifiedName(qualifierRaw);
+
+        let schema: string | undefined = qualifierParts.schema;
+        let table: string | undefined = qualifierParts.table;
 
         // Determine connection for document
         const mapping = this.manager.getSavedConnectionForDocument(document);
         if (!mapping.connectionId) {
             return null; // no mapped connection -> no table metadata
+        }
+
+        // If user typed alias., resolve alias back to underlying table from FROM/JOIN clauses.
+        if (!schema && table) {
+            const aliasResolved = this.resolveAliasTable(document, position, table);
+            if (aliasResolved) {
+                schema = aliasResolved.schema;
+                table = aliasResolved.table;
+            }
         }
 
         const cols = await this.manager.fetchColumnsForTable(mapping.connectionId, schema, table!);

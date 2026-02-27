@@ -309,7 +309,7 @@
     const activeColumnNames = new Set(
       columns
         .filter((column) => !column.markedForDrop)
-        .map((column) => column.name.trim())
+        .map((column) => column.name.trim().toLowerCase())
         .filter((name) => name.length > 0)
     );
 
@@ -378,7 +378,7 @@
         errors.push('At least one local column is required');
       }
 
-      const unknownColumns = constraint.columns.filter((columnName) => !activeColumnNames.has(columnName));
+      const unknownColumns = constraint.columns.filter((columnName) => !activeColumnNames.has(columnName.trim().toLowerCase()));
       if (unknownColumns.length > 0) {
         errors.push(`Unknown/dropped local columns: ${unknownColumns.join(', ')}`);
       }

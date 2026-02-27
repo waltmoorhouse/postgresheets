@@ -2,7 +2,7 @@
   "name": "postgresheets",
   "displayName": "PostgreSQL Data Editor",
   "description": "Connect to PostgreSQL databases and edit table data in a spreadsheet-like interface",
-  "version": "3.2.6",
+  "version": "3.4.0",
   "publisher": "WaltMoorhouse",
   "icon": "images/icon-128.png",
   "repository": {
@@ -18,6 +18,20 @@
   "activationEvents": [],
   "main": "./dist/index.js",
   "contributes": {
+    "languages": [
+      {
+        "id": "postgresql",
+        "aliases": [
+          "PostgreSQL",
+          "postgresql",
+          "SQL (PostgreSQL)"
+        ],
+        "extensions": [
+          ".psql",
+          ".pgsql"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "postgres-editor.addConnection",
@@ -129,7 +143,7 @@
       },
       {
         "command": "postgres-editor.newSqlFile",
-        "title": "New SQL File",
+        "title": "New PostgreSQL File",
         "icon": "$(file)",
         "category": "PostgreSQL"
       },
@@ -238,23 +252,29 @@
       "menubar/file": [
         {
           "command": "postgres-editor.newSqlFile",
-          "group": "2_new"
+          "group": "sql"
+        }
+      ],
+      "file/newFile": [
+        {
+          "command": "postgres-editor.newSqlFile",
+          "group": "sql"
         }
       ],
       "editor/title": [
         {
           "command": "postgres-editor.selectSqlDocumentConnection",
-          "when": "resourceLangId == sql",
+          "when": "resourceLangId == sql || resourceLangId == postgresql",
           "group": "navigation"
         },
         {
           "command": "postgres-editor.runSqlSelection",
-          "when": "resourceLangId == sql && editorHasSelection",
+          "when": "(resourceLangId == sql || resourceLangId == postgresql) && editorHasSelection",
           "group": "navigation"
         },
         {
           "command": "postgres-editor.runSqlFile",
-          "when": "resourceLangId == sql",
+          "when": "resourceLangId == sql || resourceLangId == postgresql",
           "group": "navigation"
         }
       ],
