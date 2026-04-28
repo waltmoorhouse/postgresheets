@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1.0] - 2026-04-28
+
+### Added
+- **Filtered CSV export**: Added an Export CSV button to the Data Editor toolbar so users can export the currently displayed filtered and sorted dataset to a CSV file.
+
+### Fixed
+- **CSV Import Wizard**: Fixed the No-headers flow so choosing “No, first row is data” advances to mapping and import proceeds normally. Added a raw file preview, clearer header/mapping guidance, sample values for column mapping, and a more informative import preview.
+- **CSV Export**: Fixed the bug exporting json/jsonb column types.
+
 ## [4.0.0] - 2026-01-20
 
 ### Added

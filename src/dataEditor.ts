@@ -6,6 +6,7 @@ import { DatabaseTreeItem } from './databaseTreeProvider';
 import { SqlGenerator } from './sqlGenerator';
 import { IndexManagerView } from './indexManagerView';
 import { parsePostgresArrayLiteral, applyEnumLabelsToColumns } from './pgUtils';
+import { CsvExporter } from './csvExporter';
 import type {
     ColumnInfo,
     PrimaryKeyInfo,
@@ -657,6 +658,10 @@ export class DataEditor {
                     }
                     break;
                 }
+                case 'exportFilteredData': {
+                    await this.exportFilteredData(panel, connectionId, schemaName, tableName);
+                    break;
+                }
             }
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
@@ -857,6 +862,96 @@ export class DataEditor {
 
     private quoteIdentifier(value: string): string {
         return '"' + value.replace(/"/g, '""') + '"';
+    }
+
+    private async exportFilteredData(
+        panel: vscode.WebviewPanel,
+        connectionId: string,
+        schemaName: string,
+        tableName: string
+    ): Promise<void> {
+        const client = await this.connectionManager.getClient(connectionId);
+        if (!client) {
+            vscode.window.showErrorMessage('No active connection.');
+            return;
+        }
+
+        const state = this.getPanelState(panel);
+        const cacheKey = this.buildPanelKey(connectionId, schemaName, tableName);
+        const cached = this.schemaCache.get(cacheKey);
+        if (!cached) {
+            vscode.window.showErrorMessage('Table schema not loaded. Please reload the table and try again.');
+            return;
+        }
+        const { columns } = cached;
+
+        const qualifiedTable = `${this.quoteIdentifier(schemaName)}.${this.quoteIdentifier(tableName)}`;
+        const { whereClause, values } = this.buildWhereClause(columns, state.filters, state.searchTerm, state.customWhereClause);
+
+        // Get row count first so we can warn for large exports
+        let totalCount = 0;
+        try {
+            const countSql = `SELECT COUNT(*) FROM ${qualifiedTable}${whereClause ? ` ${whereClause}` : ''}`;
+            const countResult = await client.query(countSql, values);
+            totalCount = parseInt(countResult.rows[0].count, 10);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to count rows for export: ${error}`);
+            return;
+        }
+
+        if (totalCount === 0) {
+            vscode.window.showInformationMessage('No rows match the current filter — nothing to export.');
+            return;
+        }
+
+        if (totalCount > 10000) {
+            const answer = await vscode.window.showWarningMessage(
+                `This will export ${totalCount.toLocaleString()} rows. Continue?`,
+                { modal: true },
+                'Export'
+            );
+            if (answer !== 'Export') {
+                return;
+            }
+        }
+
+        let sort = state.sort;
+        const columnNames = new Set(columns.map(c => c.name));
+        if (sort && !columnNames.has(sort.column)) {
+            sort = null;
+        }
+        const orderClause = sort
+            ? `ORDER BY ${this.quoteIdentifier(sort.column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
+            : '';
+
+        const clauseSegments = [whereClause, orderClause].filter(s => s.length > 0).join(' ');
+        const clauseSql = clauseSegments.length > 0 ? ` ${clauseSegments}` : '';
+        const dataQuery = `SELECT * FROM ${qualifiedTable}${clauseSql}`;
+
+        let dataResult;
+        try {
+            dataResult = await client.query(dataQuery, values);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Export query failed: ${error}`);
+            return;
+        }
+
+        const colNames = columns.map(c => c.name);
+        const rows = dataResult.rows.map((row: Record<string, unknown>) =>
+            colNames.map(name => {
+                const v = row[name];
+                if (v === null || v === undefined) return null;
+                if (typeof v === 'object') return JSON.stringify(v);
+                return v;
+            })
+        );
+
+        const filePath = await CsvExporter.exportToFile(colNames, rows, tableName, { includeHeaders: true });
+        if (filePath) {
+            vscode.window.showInformationMessage(
+                `Exported ${dataResult.rows.length.toLocaleString()} rows to ${filePath}`
+            );
+        }
     }
 
     private buildWhereClause(

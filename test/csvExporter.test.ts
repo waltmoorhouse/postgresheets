@@ -38,6 +38,15 @@ describe('CsvExporter', () => {
             const result = CsvExporter.escapeField('Hello "World", test\nline');
             expect(result).toBe('"Hello ""World"", test\nline"');
         });
+
+        it('should serialise JS objects as JSON (json/jsonb columns from pg)', () => {
+            // pg returns json/jsonb column values as native JS objects/arrays;
+            // String({}) gives "[object Object]" and String([1,2]) gives "1,2"
+            // — both invalid JSON that PostgreSQL would reject on reimport.
+            expect(CsvExporter.escapeField({ key: 'value' })).toBe('"{""key"":""value""}"');
+            expect(CsvExporter.escapeField([1, 2, 3])).toBe('"[1,2,3]"');
+            expect(CsvExporter.escapeField({ a: [1, 2] })).toBe('"{""a"":[1,2]}"');
+        });
     });
 
     describe('formatRow', () => {

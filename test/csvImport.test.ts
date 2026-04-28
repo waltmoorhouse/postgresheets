@@ -28,7 +28,7 @@ describe('CSV Import Tests', () => {
 
         it('should parse JSON values', () => {
             const result = CsvExporter.convertValue('{"key": "value"}', 'json');
-            expect(result).toEqual({ key: 'value' });
+            expect(result).toBe('{"key": "value"}');
         });
 
         it('should handle invalid JSON gracefully', () => {
@@ -309,8 +309,10 @@ describe('CSV Import Tests', () => {
         it('should handle JSON with nested structures', () => {
             const json = '{"user": {"name": "Alice", "age": 30}, "tags": ["a", "b"]}';
             const result = CsvExporter.convertValue(json, 'jsonb');
-            expect(typeof result).toBe('object');
-            expect(result.user.name).toBe('Alice');
+            // value returned as a string so node-postgres passes it as text;
+            // prevents JS arrays being serialized as PG array literals
+            expect(typeof result).toBe('string');
+            expect(result).toBe(json);
         });
     });
 });

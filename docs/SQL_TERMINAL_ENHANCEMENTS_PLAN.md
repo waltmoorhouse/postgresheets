@@ -1118,8 +1118,6 @@ describe('EscapeSequenceParser', () => {
 - [x] Update MANUAL_TESTING_CHECKLIST.md
 - [x] Add keyboard shortcuts documentation
 - [x] Test on macOS
-- [ ] Test on Windows (if applicable)
-- [ ] Test on Linux (if applicable)
 
 > ✅ Partial progress: Manual testing performed on macOS and the `MANUAL_TESTING_CHECKLIST.md` updated to include test cases. CHANGELOG.md, README.md, and keyboard shortcuts docs have been updated. Remaining items: Windows/Linux validation and optional cross-platform polish.
 
