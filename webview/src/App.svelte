@@ -1520,6 +1520,12 @@
           Delete selected
         </button>
         <button type="button" class="ps-btn" on:click={requestRefresh}>Refresh</button>
+        <button
+          type="button"
+          class="ps-btn"
+          on:click={() => ensureVscode().postMessage({ command: 'exportFilteredData' })}
+          title="Export the currently displayed data (with active filters) to a CSV file"
+        >Export CSV</button>
         <button type="button" class="ps-btn ps-btn--ghost" on:click={requestPreview}>Preview SQL</button>
         <button
           type="button"

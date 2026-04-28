@@ -29,8 +29,10 @@ export class CsvExporter {
             return '';
         }
 
-        // Convert to string
-        let str = String(value);
+        // Objects and arrays (e.g. json/jsonb columns returned by pg as JS values)
+        // must be serialised to a JSON string, not via String() which would give
+        // "[object Object]" or "1,2,3" (array without brackets).
+        let str = (typeof value === 'object') ? JSON.stringify(value) : String(value);
 
         // If value contains delimiter, quote, or newline, wrap in quotes and escape quotes
         if (str.includes(',') || str.includes(quoteChar) || str.includes('\n') || str.includes('\r')) {
@@ -323,11 +325,16 @@ export class CsvExporter {
 
             case 'json':
             case 'jsonb':
+                // Keep as a string so node-postgres passes it as text.
+                // If pg received a parsed JS array it would serialize it as a
+                // PostgreSQL array literal ({1,2,3}) instead of JSON ([1,2,3]),
+                // causing "invalid input syntax for type json" from the server.
                 try {
-                    return JSON.parse(value);
+                    JSON.parse(value); // validate only
                 } catch {
-                    return value; // Return as string if not valid JSON
+                    // not valid JSON; return as-is and let PostgreSQL surface the error
                 }
+                return value;
 
             case 'date':
                 return new Date(value).toISOString().split('T')[0];

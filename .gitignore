@@ -14,9 +14,6 @@ dist/
 logs/
 *.log
 
-# VS Code settings
-.vscode/
-
 # Environment files
 .env
 
